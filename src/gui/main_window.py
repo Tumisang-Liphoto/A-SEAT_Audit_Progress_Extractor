@@ -26,6 +26,9 @@ from src.gui.pages.extraction_page import ExtractionPage
 from src.gui.pages.settings_page import SettingsPage
 from src.gui.widgets.sidebar import Sidebar
 from src.services.browser_service import BrowserService
+from src.services.comparison_service import ComparisonService
+from src.services.generated_file_service import GeneratedFileService
+from src.services.reset_service import ResetService
 from src.services.settings_service import SettingsService
 from src.services.theme_service import apply_theme
 from src.utils.app_paths import application_folder
@@ -40,6 +43,9 @@ class MainWindow(QMainWindow):
 
         self.settings_service = SettingsService()
         self.browser_service = BrowserService()
+        self.comparison_service = ComparisonService()
+        self.generated_file_service = GeneratedFileService()
+        self.reset_service = ResetService()
 
         self.current_settings = (
             self.settings_service.load_settings()
@@ -121,6 +127,7 @@ class MainWindow(QMainWindow):
             self._test_system_connection,
             self._check_for_updates,
             self._install_available_update,
+            self._reset_application_data,
         )
 
         self.page_stack.addWidget(
@@ -181,6 +188,240 @@ class MainWindow(QMainWindow):
             completed_at=latest_extraction_date,
             record_count=latest_record_count,
         )
+
+        try:
+            comparison = (
+                self.comparison_service.compare_latest_snapshots()
+            )
+
+            self.dashboard_page.show_comparison(
+                comparison
+            )
+
+        except Exception as error:
+            self.dashboard_page.show_comparison_error(
+                str(error)
+            )
+
+    def _reset_application_data(
+        self,
+    ) -> None:
+        """Reset application data and restart with default settings."""
+
+        if (
+            self.extraction_thread is not None
+            and self.extraction_thread.isRunning()
+        ):
+            self.settings_page.set_reset_busy(
+                False
+            )
+
+            QMessageBox.warning(
+                self,
+                "Extraction in Progress",
+                (
+                    "Wait for the current extraction to finish "
+                    "before resetting the application."
+                ),
+            )
+            return
+
+        if (
+            self.connection_thread is not None
+            and self.connection_thread.isRunning()
+        ):
+            self.settings_page.set_reset_busy(
+                False
+            )
+
+            QMessageBox.warning(
+                self,
+                "Connection Test in Progress",
+                (
+                    "Wait for the connection test to finish "
+                    "before resetting the application."
+                ),
+            )
+            return
+
+        if (
+            self.update_thread is not None
+            and self.update_thread.isRunning()
+        ):
+            self.settings_page.set_reset_busy(
+                False
+            )
+
+            QMessageBox.warning(
+                self,
+                "Update in Progress",
+                (
+                    "Wait for the update operation to finish "
+                    "before resetting the application."
+                ),
+            )
+            return
+
+        try:
+            result = (
+                self.reset_service.reset_application_data()
+            )
+
+        except Exception as error:
+            self.settings_page.set_reset_busy(
+                False
+            )
+
+            QMessageBox.critical(
+                self,
+                "Reset Failed",
+                (
+                    "The application data could not be reset.\n\n"
+                    f"{error}"
+                ),
+            )
+            return
+
+        failed_items = result.get(
+            "failed_items",
+            [],
+        )
+
+        if failed_items:
+            self.settings_page.set_reset_busy(
+                False
+            )
+
+            failure_lines = []
+
+            for item in failed_items[:5]:
+                if isinstance(
+                    item,
+                    dict,
+                ):
+                    failure_lines.append(
+                        (
+                            f"{item.get('path', 'Unknown item')}: "
+                            f"{item.get('error', 'Unknown error')}"
+                        )
+                    )
+                else:
+                    failure_lines.append(
+                        str(item)
+                    )
+
+            if len(failed_items) > 5:
+                failure_lines.append(
+                    (
+                        f"...and {len(failed_items) - 5} "
+                        "additional item(s)."
+                    )
+                )
+
+            QMessageBox.critical(
+                self,
+                "Reset Incomplete",
+                (
+                    "Some application data could not be removed.\n\n"
+                    + "\n".join(failure_lines)
+                    + "\n\nClose any open exported files and try again."
+                ),
+            )
+            return
+
+        deleted_outputs = int(
+            result.get(
+                "generated_files_deleted",
+                0,
+            )
+        )
+
+        deleted_items = int(
+            result.get(
+                "deleted_count",
+                0,
+            )
+        )
+
+        QMessageBox.information(
+            self,
+            "Application Reset Complete",
+            (
+                "The application data has been reset successfully.\n\n"
+                f"Generated output files deleted: {deleted_outputs}\n"
+                f"Application items removed: {deleted_items}\n\n"
+                "The application will now restart with default settings."
+            ),
+        )
+
+        self._restart_after_reset()
+
+    def _restart_after_reset(
+        self,
+    ) -> None:
+        """Start a fresh application process and close this one."""
+
+        try:
+            if getattr(
+                sys,
+                "frozen",
+                False,
+            ):
+                command = [
+                    sys.executable,
+                ]
+
+                working_folder = Path(
+                    sys.executable
+                ).resolve().parent
+
+            else:
+                project_folder = (
+                    Path(__file__)
+                    .resolve()
+                    .parents[2]
+                )
+
+                command = [
+                    sys.executable,
+                    str(
+                        project_folder
+                        / "main.py"
+                    ),
+                ]
+
+                working_folder = project_folder
+
+            subprocess.Popen(
+                command,
+                cwd=str(
+                    working_folder
+                ),
+                close_fds=True,
+            )
+
+            self.allow_close_for_update = True
+
+            application = QApplication.instance()
+
+            if application is not None:
+                application.quit()
+
+        except Exception as error:
+            self.settings_page.set_reset_busy(
+                False
+            )
+
+            QMessageBox.critical(
+                self,
+                "Restart Failed",
+                (
+                    "The application data was reset, but the "
+                    "application could not restart automatically.\n\n"
+                    f"{error}\n\n"
+                    "Close and reopen the application manually."
+                ),
+            )
 
     def _change_page(
         self,
@@ -684,7 +925,21 @@ class MainWindow(QMainWindow):
             )
         ]
 
-        completed_at = datetime.now().strftime(
+        records = [
+            dict(record)
+            for record in result.get(
+                "records",
+                [],
+            )
+            if isinstance(
+                record,
+                dict,
+            )
+        ]
+
+        completed_datetime = datetime.now()
+
+        completed_at = completed_datetime.strftime(
             "%d %B %Y, %H:%M"
         )
 
@@ -693,6 +948,45 @@ class MainWindow(QMainWindow):
             completed_at=completed_at,
             record_count=record_count,
         )
+
+        processing_errors: list[str] = []
+
+        try:
+            self.generated_file_service.register_files(
+                output_paths
+            )
+        except Exception as error:
+            processing_errors.append(
+                "Generated output files could not be registered: "
+                f"{error}"
+            )
+
+        try:
+            if records:
+                self.comparison_service.save_snapshot(
+                    records=records,
+                    extracted_at=completed_datetime,
+                )
+
+            comparison = (
+                self.comparison_service.compare_latest_snapshots()
+            )
+
+            self.dashboard_page.show_comparison(
+                comparison
+            )
+
+        except Exception as error:
+            comparison_error = str(error)
+
+            processing_errors.append(
+                "The progress comparison could not be updated: "
+                f"{comparison_error}"
+            )
+
+            self.dashboard_page.show_comparison_error(
+                comparison_error
+            )
 
         self.extraction_page.show_completed(
             record_count,
@@ -705,13 +999,22 @@ class MainWindow(QMainWindow):
             output_paths=output_paths,
         )
 
+        completion_message = (
+            f"{record_count} audit records were extracted.\n\n"
+            "The output file has been created successfully."
+        )
+
+        if processing_errors:
+            completion_message += (
+                "\n\nThe extraction succeeded, but the following "
+                "supporting tasks could not be completed:\n- "
+                + "\n- ".join(processing_errors)
+            )
+
         QMessageBox.information(
             self,
             "Extraction Completed",
-            (
-                f"{record_count} audit records were extracted.\n\n"
-                "The output file has been created successfully."
-            ),
+            completion_message,
         )
 
     def _extraction_failed(

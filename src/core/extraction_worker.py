@@ -88,7 +88,9 @@ class ExtractionWorker(QObject):
                     audit_year=self.audit_year,
                 )
 
-                output_paths.append(excel_path)
+                output_paths.append(
+                    excel_path
+                )
 
             if self.output_format in {
                 "CSV File",
@@ -105,7 +107,9 @@ class ExtractionWorker(QObject):
                     audit_year=self.audit_year,
                 )
 
-                output_paths.append(csv_path)
+                output_paths.append(
+                    csv_path
+                )
 
             if not output_paths:
                 raise RuntimeError(
@@ -123,13 +127,18 @@ class ExtractionWorker(QObject):
                     str(path)
                     for path in output_paths
                 ],
+                "records": records,
             }
 
-            self.extraction_completed.emit(result)
+            self.extraction_completed.emit(
+                result
+            )
 
         except Exception as error:
             self.password = ""
-            self.extraction_failed.emit(str(error))
+            self.extraction_failed.emit(
+                str(error)
+            )
 
         finally:
             self.username = ""

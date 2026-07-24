@@ -1,11 +1,13 @@
 from collections.abc import Callable
 from typing import Any
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFileDialog,
     QFormLayout,
+    QInputDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -13,6 +15,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QProgressBar,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -29,6 +32,7 @@ class SettingsPage(QWidget):
         on_test_connection: Callable[[str], None],
         on_check_updates: Callable[[], None],
         on_install_update: Callable[[], None],
+        on_reset_application: Callable[[], None],
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -39,6 +43,7 @@ class SettingsPage(QWidget):
         self._on_test_connection = on_test_connection
         self._on_check_updates = on_check_updates
         self._on_install_update = on_install_update
+        self._on_reset_application = on_reset_application
 
         self._restoring_settings = False
         self._last_tested_url = ""
@@ -46,7 +51,28 @@ class SettingsPage(QWidget):
         self._build_interface()
 
     def _build_interface(self) -> None:
-        layout = QVBoxLayout(self)
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(
+            0,
+            0,
+            0,
+            0,
+        )
+        root_layout.setSpacing(0)
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(
+            QFrame.Shape.NoFrame
+        )
+        scroll_area.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+
+        content_widget = QWidget()
+        content_widget.setObjectName("contentPage")
+
+        layout = QVBoxLayout(content_widget)
         layout.setContentsMargins(
             32,
             28,
@@ -343,7 +369,107 @@ class SettingsPage(QWidget):
         layout.addWidget(
             settings_card
         )
+
+        reset_card = QFrame()
+        reset_card.setObjectName("formCard")
+
+        reset_layout = QVBoxLayout(
+            reset_card
+        )
+        reset_layout.setContentsMargins(
+            24,
+            22,
+            24,
+            22,
+        )
+        reset_layout.setSpacing(10)
+
+        reset_heading = QLabel(
+            "Reset Application Data"
+        )
+        reset_heading.setObjectName(
+            "sectionHeading"
+        )
+
+        reset_description = QLabel(
+            "Permanently remove saved settings, extraction history "
+            "and output files created by this application. Unrelated "
+            "files in the output folder will not be deleted."
+        )
+        reset_description.setWordWrap(True)
+        reset_description.setObjectName(
+            "pageDescription"
+        )
+
+        self.reset_application_button = QPushButton(
+            "Reset Application"
+        )
+        self.reset_application_button.setObjectName(
+            "dangerButton"
+        )
+        self.reset_application_button.setMaximumWidth(
+            190
+        )
+        self.reset_application_button.clicked.connect(
+            self._confirm_reset_application
+        )
+
+        reset_layout.addWidget(
+            reset_heading
+        )
+        reset_layout.addWidget(
+            reset_description
+        )
+        reset_layout.addSpacing(4)
+        reset_layout.addWidget(
+            self.reset_application_button,
+            alignment=Qt.AlignmentFlag.AlignLeft,
+        )
+
+        layout.addWidget(
+            reset_card
+        )
         layout.addStretch()
+
+        scroll_area.setWidget(
+            content_widget
+        )
+        root_layout.addWidget(
+            scroll_area
+        )
+
+        self.setStyleSheet(
+            """
+            QPushButton#dangerButton {
+                background-color: #b91c1c;
+                color: white;
+                border: 1px solid #991b1b;
+                border-radius: 7px;
+                padding: 9px 16px;
+                font-weight: 700;
+            }
+
+            QPushButton#dangerButton:hover {
+                background-color: #991b1b;
+            }
+
+            QPushButton#dangerButton:pressed {
+                background-color: #7f1d1d;
+            }
+
+            QPushButton#dangerButton:disabled {
+                background-color: #9ca3af;
+                border-color: #9ca3af;
+                color: #f3f4f6;
+            }
+
+            QLabel#sectionHeading {
+                background-color: transparent;
+                font-size: 15px;
+                font-weight: 700;
+            }
+            """
+        )
 
     def load_settings(
         self,
@@ -1209,6 +1335,83 @@ class SettingsPage(QWidget):
                 font-weight: 700;
             }
             """
+        )
+
+    def _confirm_reset_application(
+        self,
+    ) -> None:
+        """Require the user to type RESET before continuing."""
+
+        warning_message = (
+            "This will permanently delete:\n\n"
+            "• saved application settings\n"
+            "• the remembered username\n"
+            "• extraction comparison history\n"
+            "• Excel and CSV files registered as created by this application\n\n"
+            "Unrelated files in the selected output folder will not be deleted.\n"
+            "This action cannot be undone.\n\n"
+            "Type RESET below to continue."
+        )
+
+        confirmation_text, accepted = (
+            QInputDialog.getText(
+                self,
+                "Reset Application Data",
+                warning_message,
+            )
+        )
+
+        if not accepted:
+            return
+
+        if confirmation_text.strip() != "RESET":
+            QMessageBox.warning(
+                self,
+                "Reset Cancelled",
+                (
+                    "The confirmation text did not match RESET. "
+                    "No application data was deleted."
+                ),
+            )
+            return
+
+        final_answer = QMessageBox.question(
+            self,
+            "Final Reset Confirmation",
+            (
+                "Are you sure you want to reset the application now?\n\n"
+                "The application will restart after the reset."
+            ),
+            (
+                QMessageBox.StandardButton.Yes
+                | QMessageBox.StandardButton.No
+            ),
+            QMessageBox.StandardButton.No,
+        )
+
+        if final_answer != QMessageBox.StandardButton.Yes:
+            return
+
+        self.set_reset_busy(
+            True
+        )
+
+        self._on_reset_application()
+
+    def set_reset_busy(
+        self,
+        busy: bool,
+    ) -> None:
+        """Disable the reset button while data is being removed."""
+
+        self.reset_application_button.setEnabled(
+            not busy
+        )
+
+        self.reset_application_button.setText(
+            "Resetting..."
+            if busy
+            else "Reset Application"
         )
 
     @staticmethod
