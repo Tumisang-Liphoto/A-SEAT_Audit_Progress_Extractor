@@ -60,7 +60,7 @@ class SettingsPage(QWidget):
 
         description = QLabel(
             "Configure appearance, system access, exports "
-            "and application updates."
+            "and automatic application updates."
         )
         description.setObjectName("pageDescription")
         description.setWordWrap(True)
