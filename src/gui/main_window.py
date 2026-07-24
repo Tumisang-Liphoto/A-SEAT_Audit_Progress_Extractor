@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 
 from src.core.connection_worker import ConnectionWorker
 from src.core.extraction_worker import ExtractionWorker
+from src.core.update_worker import UpdateWorker
 from src.gui.dialogs.login_dialog import LoginDialog
 from src.gui.pages.dashboard_page import DashboardPage
 from src.gui.pages.extraction_page import ExtractionPage
@@ -44,6 +45,9 @@ class MainWindow(QMainWindow):
 
         self.connection_thread: QThread | None = None
         self.connection_worker: ConnectionWorker | None = None
+
+        self.update_thread: QThread | None = None
+        self.update_worker: UpdateWorker | None = None
 
         self.connection_test_url = ""
         self.connection_test_system_name = "A-SEAT"
@@ -106,6 +110,7 @@ class MainWindow(QMainWindow):
         self.settings_page = SettingsPage(
             self._save_settings,
             self._test_system_connection,
+            self._check_for_updates,
         )
 
         self.page_stack.addWidget(
@@ -683,7 +688,7 @@ class MainWindow(QMainWindow):
     def _extraction_thread_finished(
         self,
     ) -> None:
-        """Clear extraction worker references."""
+        """Clear extraction-worker references."""
 
         self.extraction_page.set_busy(
             False
@@ -837,7 +842,7 @@ class MainWindow(QMainWindow):
     def _connection_thread_finished(
         self,
     ) -> None:
-        """Clear connection worker references."""
+        """Clear connection-worker references."""
 
         self.connection_worker = None
         self.connection_thread = None
@@ -845,6 +850,112 @@ class MainWindow(QMainWindow):
         self.connection_test_system_name = (
             "A-SEAT"
         )
+
+    def _check_for_updates(self) -> None:
+        """Start a GitHub update check."""
+
+        if self.update_thread is not None:
+            return
+
+        self.update_thread = QThread(
+            self
+        )
+
+        self.update_worker = UpdateWorker()
+
+        self.update_worker.moveToThread(
+            self.update_thread
+        )
+
+        self.update_thread.started.connect(
+            self.update_worker.run
+        )
+
+        self.update_worker.update_check_completed.connect(
+            self._update_check_completed
+        )
+
+        self.update_worker.update_check_failed.connect(
+            self._update_check_failed
+        )
+
+        self.update_worker.finished.connect(
+            self.update_thread.quit
+        )
+
+        self.update_worker.finished.connect(
+            self.update_worker.deleteLater
+        )
+
+        self.update_thread.finished.connect(
+            self.update_thread.deleteLater
+        )
+
+        self.update_thread.finished.connect(
+            self._update_thread_finished
+        )
+
+        self.update_thread.start()
+
+    def _update_check_completed(
+        self,
+        result: dict[str, Any],
+    ) -> None:
+        """Display the GitHub update-check result."""
+
+        current_version = str(
+            result.get(
+                "current_version",
+                APP_VERSION,
+            )
+        )
+
+        latest_version = str(
+            result.get(
+                "latest_version",
+                current_version,
+            )
+        )
+
+        release_name = str(
+            result.get(
+                "release_name",
+                "",
+            )
+        )
+
+        if bool(
+            result.get(
+                "update_available",
+                False,
+            )
+        ):
+            self.settings_page.show_update_available(
+                latest_version=latest_version,
+                release_name=release_name,
+            )
+        else:
+            self.settings_page.show_no_update(
+                current_version=current_version
+            )
+
+    def _update_check_failed(
+        self,
+        message: str,
+    ) -> None:
+        """Display a failed update check."""
+
+        self.settings_page.show_update_failure(
+            message
+        )
+
+    def _update_thread_finished(
+        self,
+    ) -> None:
+        """Clear update-worker references."""
+
+        self.update_worker = None
+        self.update_thread = None
 
     def closeEvent(self, event) -> None:
         """Prevent closure while background work is running."""
@@ -876,6 +987,22 @@ class MainWindow(QMainWindow):
                 (
                     "Wait for the connection test "
                     "to finish before closing the application."
+                ),
+            )
+
+            event.ignore()
+            return
+
+        if (
+            self.update_thread is not None
+            and self.update_thread.isRunning()
+        ):
+            QMessageBox.warning(
+                self,
+                "Update Check in Progress",
+                (
+                    "Wait for the update check to finish "
+                    "before closing the application."
                 ),
             )
 

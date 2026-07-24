@@ -24,6 +24,7 @@ class SettingsPage(QWidget):
         self,
         on_save_settings: Callable[[dict[str, Any]], None],
         on_test_connection: Callable[[str], None],
+        on_check_updates: Callable[[], None],
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -32,6 +33,7 @@ class SettingsPage(QWidget):
 
         self._on_save_settings = on_save_settings
         self._on_test_connection = on_test_connection
+        self._on_check_updates = on_check_updates
 
         self._restoring_settings = False
         self._last_tested_url = ""
@@ -89,11 +91,14 @@ class SettingsPage(QWidget):
         self.system_name_input.setPlaceholderText(
             "Enter your organisation's system name"
         )
-        self.system_name_input.setClearButtonEnabled(True)
+        self.system_name_input.setClearButtonEnabled(
+            True
+        )
 
         self.system_url_input = QLineEdit()
         self.system_url_input.setPlaceholderText(
-            "For example: http://10.1.6.133/system/dashboard/"
+            "For example: "
+            "http://10.1.6.133/system/dashboard/"
         )
         self.system_url_input.textChanged.connect(
             self._system_url_changed
@@ -114,7 +119,9 @@ class SettingsPage(QWidget):
         self.test_connection_button = QPushButton(
             "Test Connection"
         )
-        self.test_connection_button.setMaximumWidth(160)
+        self.test_connection_button.setMaximumWidth(
+            160
+        )
         self.test_connection_button.clicked.connect(
             self._test_connection
         )
@@ -125,7 +132,9 @@ class SettingsPage(QWidget):
         self.connection_status_label.setObjectName(
             "statusLabel"
         )
-        self.connection_status_label.setWordWrap(True)
+        self.connection_status_label.setWordWrap(
+            True
+        )
 
         connection_layout.addWidget(
             self.test_connection_button
@@ -146,9 +155,13 @@ class SettingsPage(QWidget):
         )
 
         self.output_folder_input = QLineEdit()
-        self.output_folder_input.setReadOnly(True)
+        self.output_folder_input.setReadOnly(
+            True
+        )
 
-        browse_button = QPushButton("Browse")
+        browse_button = QPushButton(
+            "Browse"
+        )
         browse_button.clicked.connect(
             self._select_output_folder
         )
@@ -207,11 +220,51 @@ class SettingsPage(QWidget):
             self.ask_before_update,
         )
 
-        button_layout = QHBoxLayout()
+        update_widget = QWidget()
+        update_layout = QVBoxLayout(
+            update_widget
+        )
+        update_layout.setContentsMargins(
+            0,
+            0,
+            0,
+            0,
+        )
+        update_layout.setSpacing(7)
 
         self.check_updates_button = QPushButton(
             "Check for Updates"
         )
+        self.check_updates_button.setMaximumWidth(
+            180
+        )
+        self.check_updates_button.clicked.connect(
+            self._check_for_updates
+        )
+
+        self.update_status_label = QLabel(
+            "Update Status: Not checked"
+        )
+        self.update_status_label.setObjectName(
+            "statusLabel"
+        )
+        self.update_status_label.setWordWrap(
+            True
+        )
+
+        update_layout.addWidget(
+            self.check_updates_button
+        )
+        update_layout.addWidget(
+            self.update_status_label
+        )
+
+        form.addRow(
+            "Application updates:",
+            update_widget,
+        )
+
+        button_layout = QHBoxLayout()
 
         self.save_button = QPushButton(
             "Save Settings"
@@ -223,29 +276,34 @@ class SettingsPage(QWidget):
             self._save_settings
         )
 
-        button_layout.addWidget(
-            self.check_updates_button
-        )
         button_layout.addStretch()
         button_layout.addWidget(
             self.save_button
         )
 
-        settings_layout.addLayout(form)
+        settings_layout.addLayout(
+            form
+        )
         settings_layout.addLayout(
             button_layout
         )
 
-        layout.addWidget(heading)
-        layout.addWidget(description)
-        layout.addWidget(settings_card)
+        layout.addWidget(
+            heading
+        )
+        layout.addWidget(
+            description
+        )
+        layout.addWidget(
+            settings_card
+        )
         layout.addStretch()
 
     def load_settings(
         self,
         settings: dict[str, Any],
     ) -> None:
-        """Load and display saved application settings."""
+        """Load and display saved settings."""
 
         self._restoring_settings = True
 
@@ -379,7 +437,8 @@ class SettingsPage(QWidget):
 
         if test_status == "successful":
             status_text = (
-                "Connection Status: Last test successful"
+                "Connection Status: "
+                "Last test successful"
             )
 
             if tested_at:
@@ -391,7 +450,7 @@ class SettingsPage(QWidget):
                 status_text
             )
 
-            self._set_success_style()
+            self._set_connection_success_style()
             return
 
         status_text = (
@@ -412,13 +471,13 @@ class SettingsPage(QWidget):
             status_text
         )
 
-        self._set_failure_style()
+        self._set_connection_failure_style()
 
     def _system_url_changed(
         self,
         new_url: str,
     ) -> None:
-        """Reset the displayed test result when the URL changes."""
+        """Reset the test result when the URL changes."""
 
         if self._restoring_settings:
             return
@@ -429,7 +488,8 @@ class SettingsPage(QWidget):
 
         if (
             self._last_tested_url
-            and normalised_url == self._last_tested_url
+            and normalised_url
+            == self._last_tested_url
         ):
             return
 
@@ -471,7 +531,9 @@ class SettingsPage(QWidget):
             self.system_url_input.setFocus()
             return
 
-        self.set_connection_test_busy(True)
+        self.set_connection_test_busy(
+            True
+        )
 
         self._on_test_connection(
             system_url
@@ -520,13 +582,15 @@ class SettingsPage(QWidget):
         tested_at: str = "",
         tested_url: str = "",
     ) -> None:
-        """Display a successful connection test."""
+        self.set_connection_test_busy(
+            False
+        )
 
-        self.set_connection_test_busy(False)
-
-        self._last_tested_url = self._normalise_url(
-            tested_url
-            or self.system_url_input.text()
+        self._last_tested_url = (
+            self._normalise_url(
+                tested_url
+                or self.system_url_input.text()
+            )
         )
 
         status_text = (
@@ -542,7 +606,7 @@ class SettingsPage(QWidget):
             status_text
         )
 
-        self._set_success_style()
+        self._set_connection_success_style()
 
     def show_connection_warning(
         self,
@@ -550,13 +614,15 @@ class SettingsPage(QWidget):
         tested_at: str = "",
         tested_url: str = "",
     ) -> None:
-        """Display a connection test that did not confirm login."""
+        self.set_connection_test_busy(
+            False
+        )
 
-        self.set_connection_test_busy(False)
-
-        self._last_tested_url = self._normalise_url(
-            tested_url
-            or self.system_url_input.text()
+        self._last_tested_url = (
+            self._normalise_url(
+                tested_url
+                or self.system_url_input.text()
+            )
         )
 
         system_name = (
@@ -591,7 +657,7 @@ class SettingsPage(QWidget):
             status_text
         )
 
-        self._set_failure_style()
+        self._set_connection_failure_style()
 
     def show_connection_failure(
         self,
@@ -599,13 +665,15 @@ class SettingsPage(QWidget):
         tested_at: str = "",
         tested_url: str = "",
     ) -> None:
-        """Display a failed connection test."""
+        self.set_connection_test_busy(
+            False
+        )
 
-        self.set_connection_test_busy(False)
-
-        self._last_tested_url = self._normalise_url(
-            tested_url
-            or self.system_url_input.text()
+        self._last_tested_url = (
+            self._normalise_url(
+                tested_url
+                or self.system_url_input.text()
+            )
         )
 
         status_text = (
@@ -626,15 +694,15 @@ class SettingsPage(QWidget):
             status_text
         )
 
-        self._set_failure_style()
+        self._set_connection_failure_style()
 
     def show_connection_not_tested(
         self,
         different_address: bool = False,
     ) -> None:
-        """Display a neutral connection status."""
-
-        self.set_connection_test_busy(False)
+        self.set_connection_test_busy(
+            False
+        )
 
         if different_address:
             text = (
@@ -659,7 +727,7 @@ class SettingsPage(QWidget):
             """
         )
 
-    def _set_success_style(self) -> None:
+    def _set_connection_success_style(self) -> None:
         self.connection_status_label.setStyleSheet(
             """
             QLabel {
@@ -670,8 +738,134 @@ class SettingsPage(QWidget):
             """
         )
 
-    def _set_failure_style(self) -> None:
+    def _set_connection_failure_style(self) -> None:
         self.connection_status_label.setStyleSheet(
+            """
+            QLabel {
+                color: #dc2626;
+                background-color: transparent;
+                font-weight: 700;
+            }
+            """
+        )
+
+    def _check_for_updates(self) -> None:
+        """Request a GitHub update check."""
+
+        self.set_update_check_busy(
+            True
+        )
+
+        self._on_check_updates()
+
+    def set_update_check_busy(
+        self,
+        busy: bool,
+    ) -> None:
+        """Enable or disable the update-check controls."""
+
+        self.check_updates_button.setEnabled(
+            not busy
+        )
+
+        self.check_updates_button.setText(
+            "Checking..."
+            if busy
+            else "Check for Updates"
+        )
+
+        if busy:
+            self.update_status_label.setText(
+                "Update Status: Checking GitHub..."
+            )
+
+            self.update_status_label.setStyleSheet(
+                """
+                QLabel {
+                    color: #d97706;
+                    background-color: transparent;
+                    font-weight: 600;
+                }
+                """
+            )
+
+    def show_no_update(
+        self,
+        current_version: str,
+    ) -> None:
+        """Show that the installed version is current."""
+
+        self.set_update_check_busy(
+            False
+        )
+
+        self.update_status_label.setText(
+            (
+                "Update Status: Application is up to date\n"
+                f"Installed version: {current_version}"
+            )
+        )
+
+        self.update_status_label.setStyleSheet(
+            """
+            QLabel {
+                color: #15803d;
+                background-color: transparent;
+                font-weight: 700;
+            }
+            """
+        )
+
+    def show_update_available(
+        self,
+        latest_version: str,
+        release_name: str,
+    ) -> None:
+        """Show that a newer release is available."""
+
+        self.set_update_check_busy(
+            False
+        )
+
+        status_text = (
+            "Update Status: Update available\n"
+            f"Latest version: {latest_version}"
+        )
+
+        if release_name:
+            status_text += (
+                f"\n{release_name}"
+            )
+
+        self.update_status_label.setText(
+            status_text
+        )
+
+        self.update_status_label.setStyleSheet(
+            """
+            QLabel {
+                color: #2563eb;
+                background-color: transparent;
+                font-weight: 700;
+            }
+            """
+        )
+
+    def show_update_failure(
+        self,
+        message: str,
+    ) -> None:
+        """Show an update-check error."""
+
+        self.set_update_check_busy(
+            False
+        )
+
+        self.update_status_label.setText(
+            f"Update Status: Check failed\n{message}"
+        )
+
+        self.update_status_label.setStyleSheet(
             """
             QLabel {
                 color: #dc2626;
