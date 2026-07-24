@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QProgressBar,
     QVBoxLayout,
     QWidget,
 )
@@ -27,6 +28,7 @@ class SettingsPage(QWidget):
         on_save_settings: Callable[[dict[str, Any]], None],
         on_test_connection: Callable[[str], None],
         on_check_updates: Callable[[], None],
+        on_install_update: Callable[[], None],
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -36,6 +38,7 @@ class SettingsPage(QWidget):
         self._on_save_settings = on_save_settings
         self._on_test_connection = on_test_connection
         self._on_check_updates = on_check_updates
+        self._on_install_update = on_install_update
 
         self._restoring_settings = False
         self._last_tested_url = ""
@@ -244,6 +247,37 @@ class SettingsPage(QWidget):
             self._check_for_updates
         )
 
+        self.install_update_button = QPushButton(
+            "Download and Install"
+        )
+        self.install_update_button.setObjectName(
+            "primaryButton"
+        )
+        self.install_update_button.setMaximumWidth(
+            190
+        )
+        self.install_update_button.setVisible(
+            False
+        )
+        self.install_update_button.clicked.connect(
+            self._install_update
+        )
+
+        self.update_progress_bar = QProgressBar()
+        self.update_progress_bar.setRange(
+            0,
+            100,
+        )
+        self.update_progress_bar.setValue(
+            0
+        )
+        self.update_progress_bar.setTextVisible(
+            True
+        )
+        self.update_progress_bar.setVisible(
+            False
+        )
+
         self.update_status_label = QLabel(
             (
                 f"Current version: {APP_VERSION}\n"
@@ -260,6 +294,12 @@ class SettingsPage(QWidget):
 
         update_layout.addWidget(
             self.check_updates_button
+        )
+        update_layout.addWidget(
+            self.install_update_button
+        )
+        update_layout.addWidget(
+            self.update_progress_bar
         )
         update_layout.addWidget(
             self.update_status_label
@@ -489,6 +529,13 @@ class SettingsPage(QWidget):
     ) -> None:
         """Restore the most recent update-check result."""
 
+        self.install_update_button.setVisible(
+            False
+        )
+        self.update_progress_bar.setVisible(
+            False
+        )
+
         status = str(
             settings.get(
                 "last_update_check_status",
@@ -556,6 +603,7 @@ class SettingsPage(QWidget):
                 latest_version=latest_version or "Unknown",
                 release_name=release_name,
                 checked_at=checked_at,
+                allow_install=False,
             )
             return
 
@@ -850,6 +898,11 @@ class SettingsPage(QWidget):
 
         self._on_check_updates()
 
+    def _install_update(self) -> None:
+        """Request download and installation of the available update."""
+
+        self._on_install_update()
+
     def set_update_check_busy(
         self,
         busy: bool,
@@ -857,6 +910,10 @@ class SettingsPage(QWidget):
         """Enable or disable the update-check controls."""
 
         self.check_updates_button.setEnabled(
+            not busy
+        )
+
+        self.install_update_button.setEnabled(
             not busy
         )
 
@@ -896,6 +953,13 @@ class SettingsPage(QWidget):
             False
         )
 
+        self.install_update_button.setVisible(
+            False
+        )
+        self.update_progress_bar.setVisible(
+            False
+        )
+
         last_checked = checked_at or "Unknown"
 
         self.update_status_label.setText(
@@ -922,10 +986,21 @@ class SettingsPage(QWidget):
         latest_version: str,
         release_name: str,
         checked_at: str = "",
+        allow_install: bool = True,
     ) -> None:
         """Show that a newer release is available."""
 
         self.set_update_check_busy(
+            False
+        )
+
+        self.install_update_button.setVisible(
+            allow_install
+        )
+        self.install_update_button.setEnabled(
+            allow_install
+        )
+        self.update_progress_bar.setVisible(
             False
         )
 
@@ -968,6 +1043,13 @@ class SettingsPage(QWidget):
             False
         )
 
+        self.install_update_button.setVisible(
+            False
+        )
+        self.update_progress_bar.setVisible(
+            False
+        )
+
         last_checked = checked_at or "Unknown"
 
         self.update_status_label.setText(
@@ -975,6 +1057,146 @@ class SettingsPage(QWidget):
                 f"Current version: {current_version}\n"
                 "Update status: Check failed\n"
                 f"Last checked: {last_checked}\n"
+                f"{message}"
+            )
+        )
+
+        self.update_status_label.setStyleSheet(
+            """
+            QLabel {
+                color: #dc2626;
+                background-color: transparent;
+                font-weight: 700;
+            }
+            """
+        )
+
+    def set_update_install_busy(
+        self,
+        busy: bool,
+    ) -> None:
+        """Enable or disable controls during update preparation."""
+
+        self.check_updates_button.setEnabled(
+            not busy
+        )
+        self.install_update_button.setEnabled(
+            not busy
+        )
+        self.install_update_button.setText(
+            "Preparing Update..."
+            if busy
+            else "Download and Install"
+        )
+
+        self.update_progress_bar.setVisible(
+            busy
+        )
+
+        if busy:
+            self.update_progress_bar.setValue(
+                0
+            )
+
+    def show_update_download_progress(
+        self,
+        percentage: int,
+        message: str,
+    ) -> None:
+        """Display update download and verification progress."""
+
+        self.set_update_install_busy(
+            True
+        )
+
+        self.update_progress_bar.setValue(
+            max(
+                0,
+                min(
+                    percentage,
+                    100,
+                ),
+            )
+        )
+
+        self.update_status_label.setText(
+            (
+                f"Current version: {APP_VERSION}\n"
+                f"Update status: {message}\n"
+                f"Progress: {percentage}%"
+            )
+        )
+
+        self.update_status_label.setStyleSheet(
+            """
+            QLabel {
+                color: #d97706;
+                background-color: transparent;
+                font-weight: 700;
+            }
+            """
+        )
+
+    def show_update_ready(
+        self,
+        latest_version: str,
+    ) -> None:
+        """Show that the update is ready to be installed."""
+
+        self.set_update_install_busy(
+            False
+        )
+
+        self.update_progress_bar.setVisible(
+            True
+        )
+        self.update_progress_bar.setValue(
+            100
+        )
+
+        self.update_status_label.setText(
+            (
+                f"Current version: {APP_VERSION}\n"
+                f"Update status: Version {latest_version} "
+                "is ready to install\n"
+                "The application will now close and restart."
+            )
+        )
+
+        self.update_status_label.setStyleSheet(
+            """
+            QLabel {
+                color: #15803d;
+                background-color: transparent;
+                font-weight: 700;
+            }
+            """
+        )
+
+    def show_update_install_failure(
+        self,
+        message: str,
+    ) -> None:
+        """Display a download or update-preparation failure."""
+
+        self.set_update_install_busy(
+            False
+        )
+
+        self.update_progress_bar.setVisible(
+            False
+        )
+        self.install_update_button.setVisible(
+            True
+        )
+        self.install_update_button.setEnabled(
+            True
+        )
+
+        self.update_status_label.setText(
+            (
+                f"Current version: {APP_VERSION}\n"
+                "Update status: Download or preparation failed\n"
                 f"{message}"
             )
         )

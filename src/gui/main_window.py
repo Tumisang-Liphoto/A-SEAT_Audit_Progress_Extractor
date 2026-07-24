@@ -1,6 +1,10 @@
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+import os
+import shutil
+import subprocess
+import sys
 
 from PySide6.QtCore import QThread
 from PySide6.QtWidgets import (
@@ -24,6 +28,7 @@ from src.gui.widgets.sidebar import Sidebar
 from src.services.browser_service import BrowserService
 from src.services.settings_service import SettingsService
 from src.services.theme_service import apply_theme
+from src.utils.app_paths import application_folder
 from src.utils.version import APP_NAME, APP_VERSION
 
 
@@ -48,6 +53,10 @@ class MainWindow(QMainWindow):
 
         self.update_thread: QThread | None = None
         self.update_worker: UpdateWorker | None = None
+        self.available_release_information: dict[str, Any] = {}
+        self.prepared_update_information: dict[str, Any] = {}
+        self.install_update_after_thread = False
+        self.allow_close_for_update = False
 
         self.connection_test_url = ""
         self.connection_test_system_name = "A-SEAT"
@@ -111,6 +120,7 @@ class MainWindow(QMainWindow):
             self._save_settings,
             self._test_system_connection,
             self._check_for_updates,
+            self._install_available_update,
         )
 
         self.page_stack.addWidget(
@@ -900,7 +910,9 @@ class MainWindow(QMainWindow):
             self
         )
 
-        self.update_worker = UpdateWorker()
+        self.update_worker = UpdateWorker(
+            operation="check"
+        )
 
         self.update_worker.moveToThread(
             self.update_thread
@@ -973,6 +985,10 @@ class MainWindow(QMainWindow):
                 False,
             )
         ):
+            self.available_release_information = dict(
+                result
+            )
+
             self._save_update_check_result(
                 status="update_available",
                 checked_at=checked_at,
@@ -988,6 +1004,8 @@ class MainWindow(QMainWindow):
                 checked_at=checked_at,
             )
         else:
+            self.available_release_information = {}
+
             self._save_update_check_result(
                 status="up_to_date",
                 checked_at=checked_at,
@@ -1011,6 +1029,8 @@ class MainWindow(QMainWindow):
             "%d %B %Y, %H:%M"
         )
 
+        self.available_release_information = {}
+
         self._save_update_check_result(
             status="failed",
             checked_at=checked_at,
@@ -1024,16 +1044,300 @@ class MainWindow(QMainWindow):
             checked_at=checked_at,
         )
 
+    def _install_available_update(self) -> None:
+        """Download and prepare the available application update."""
+
+        if self.update_thread is not None:
+            return
+
+        if not self.available_release_information:
+            QMessageBox.information(
+                self,
+                "Check for Updates",
+                (
+                    "Check for updates again before downloading "
+                    "and installing a release."
+                ),
+            )
+            return
+
+        if not getattr(
+            sys,
+            "frozen",
+            False,
+        ):
+            QMessageBox.information(
+                self,
+                "Packaged Application Required",
+                (
+                    "Automatic installation can only be tested from "
+                    "the packaged application. The source-code version "
+                    "can still check and prepare releases."
+                ),
+            )
+            return
+
+        latest_version = str(
+            self.available_release_information.get(
+                "latest_version",
+                "",
+            )
+        )
+
+        if bool(
+            self.current_settings.get(
+                "ask_before_update",
+                True,
+            )
+        ):
+            answer = QMessageBox.question(
+                self,
+                "Install Update",
+                (
+                    f"Download and install version {latest_version}?\n\n"
+                    "The application will close and restart. "
+                    "Your configuration will be preserved."
+                ),
+                (
+                    QMessageBox.StandardButton.Yes
+                    | QMessageBox.StandardButton.No
+                ),
+                QMessageBox.StandardButton.No,
+            )
+
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+
+        self.settings_page.set_update_install_busy(
+            True
+        )
+
+        self.update_thread = QThread(
+            self
+        )
+
+        self.update_worker = UpdateWorker(
+            operation="prepare",
+            release_information=(
+                self.available_release_information
+            ),
+        )
+
+        self.update_worker.moveToThread(
+            self.update_thread
+        )
+
+        self.update_thread.started.connect(
+            self.update_worker.run
+        )
+
+        self.update_worker.download_progress.connect(
+            self.settings_page.show_update_download_progress
+        )
+
+        self.update_worker.update_prepared.connect(
+            self._update_prepared
+        )
+
+        self.update_worker.update_preparation_failed.connect(
+            self._update_preparation_failed
+        )
+
+        self.update_worker.finished.connect(
+            self.update_thread.quit
+        )
+
+        self.update_worker.finished.connect(
+            self.update_worker.deleteLater
+        )
+
+        self.update_thread.finished.connect(
+            self.update_thread.deleteLater
+        )
+
+        self.update_thread.finished.connect(
+            self._update_thread_finished
+        )
+
+        self.update_thread.start()
+
+    def _update_prepared(
+        self,
+        result: dict[str, Any],
+    ) -> None:
+        """Store the prepared update until its worker thread closes."""
+
+        self.prepared_update_information = dict(
+            result
+        )
+
+        latest_version = str(
+            result.get(
+                "latest_version",
+                "",
+            )
+        )
+
+        self.settings_page.show_update_ready(
+            latest_version
+        )
+
+        self.install_update_after_thread = True
+
+    def _update_preparation_failed(
+        self,
+        message: str,
+    ) -> None:
+        """Display an update download or preparation failure."""
+
+        self.install_update_after_thread = False
+        self.prepared_update_information = {}
+
+        self.settings_page.show_update_install_failure(
+            message
+        )
+
+    def _locate_packaged_updater(self) -> Path:
+        """Locate the updater included with the packaged application."""
+
+        app_folder = application_folder()
+
+        candidates = [
+            (
+                app_folder
+                / "_internal"
+                / "A-SEAT Updater.exe"
+            ),
+            app_folder / "A-SEAT Updater.exe",
+        ]
+
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate
+
+        raise RuntimeError(
+            "The packaged A-SEAT updater executable could not be found."
+        )
+
+    def _launch_external_updater(self) -> None:
+        """Copy and launch the updater outside the application folder."""
+
+        information = dict(
+            self.prepared_update_information
+        )
+
+        self.prepared_update_information = {}
+        self.install_update_after_thread = False
+
+        try:
+            source_updater = self._locate_packaged_updater()
+
+            workspace = Path(
+                str(
+                    information.get(
+                        "workspace",
+                        "",
+                    )
+                )
+            ).resolve()
+
+            payload_folder = Path(
+                str(
+                    information.get(
+                        "payload_folder",
+                        "",
+                    )
+                )
+            ).resolve()
+
+            latest_version = str(
+                information.get(
+                    "latest_version",
+                    "",
+                )
+            ).strip()
+
+            if not workspace.is_dir():
+                raise RuntimeError(
+                    "The prepared update workspace could not be found."
+                )
+
+            if not payload_folder.is_dir():
+                raise RuntimeError(
+                    "The prepared update package could not be found."
+                )
+
+            updater_copy = (
+                workspace
+                / "A-SEAT Updater.exe"
+            )
+
+            shutil.copy2(
+                source_updater,
+                updater_copy,
+            )
+
+            target_folder = application_folder()
+
+            command = [
+                str(updater_copy),
+                "--source",
+                str(payload_folder),
+                "--target",
+                str(target_folder),
+                "--workspace",
+                str(workspace),
+                "--pid",
+                str(os.getpid()),
+                "--version",
+                latest_version,
+            ]
+
+            subprocess.Popen(
+                command,
+                cwd=str(workspace),
+                creationflags=(
+                    subprocess.CREATE_NEW_PROCESS_GROUP
+                    | subprocess.DETACHED_PROCESS
+                ),
+                close_fds=True,
+            )
+
+            self.allow_close_for_update = True
+
+            application = QApplication.instance()
+
+            if application is not None:
+                application.quit()
+
+        except Exception as error:
+            self.settings_page.show_update_install_failure(
+                str(error)
+            )
+
+            QMessageBox.critical(
+                self,
+                "Update Could Not Start",
+                str(error),
+            )
+
     def _update_thread_finished(
         self,
     ) -> None:
-        """Clear update-worker references."""
+        """Clear update-worker references and launch a prepared update."""
 
         self.update_worker = None
         self.update_thread = None
 
+        if self.install_update_after_thread:
+            self._launch_external_updater()
+
     def closeEvent(self, event) -> None:
         """Prevent closure while background work is running."""
+
+        if self.allow_close_for_update:
+            event.accept()
+            return
 
         if (
             self.extraction_thread is not None
