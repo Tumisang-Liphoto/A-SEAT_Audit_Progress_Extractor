@@ -1,0 +1,39 @@
+# Python environments
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# User-specific application settings
+config/user_settings.json
+
+# Generated exports
+output/
+outputs/
+exports/
+*.xlsx
+*.xls
+*.csv
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+
+# Browser and testing output
+playwright-report/
+test-results/
+
+# Packaging output
+build/
+dist/
+*.spec
+
+# Editor and operating-system files
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
