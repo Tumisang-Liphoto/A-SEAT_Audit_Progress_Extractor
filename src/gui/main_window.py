@@ -385,6 +385,45 @@ class MainWindow(QMainWindow):
             self.current_settings
         )
 
+    def _save_update_check_result(
+        self,
+        status: str,
+        checked_at: str,
+        current_version: str,
+        latest_version: str = "",
+        release_name: str = "",
+        message: str = "",
+    ) -> None:
+        """Save the latest GitHub update-check result."""
+
+        self.current_settings[
+            "last_update_check_status"
+        ] = status
+
+        self.current_settings[
+            "last_update_check_time"
+        ] = checked_at
+
+        self.current_settings[
+            "last_update_check_current_version"
+        ] = current_version
+
+        self.current_settings[
+            "last_update_check_latest_version"
+        ] = latest_version
+
+        self.current_settings[
+            "last_update_check_release_name"
+        ] = release_name
+
+        self.current_settings[
+            "last_update_check_message"
+        ] = message
+
+        self.settings_service.save_settings(
+            self.current_settings
+        )
+
     @staticmethod
     def _normalise_url(
         url: str,
@@ -901,7 +940,11 @@ class MainWindow(QMainWindow):
         self,
         result: dict[str, Any],
     ) -> None:
-        """Display the GitHub update-check result."""
+        """Save and display the GitHub update-check result."""
+
+        checked_at = datetime.now().strftime(
+            "%d %B %Y, %H:%M"
+        )
 
         current_version = str(
             result.get(
@@ -930,23 +973,55 @@ class MainWindow(QMainWindow):
                 False,
             )
         ):
-            self.settings_page.show_update_available(
+            self._save_update_check_result(
+                status="update_available",
+                checked_at=checked_at,
+                current_version=current_version,
                 latest_version=latest_version,
                 release_name=release_name,
             )
+
+            self.settings_page.show_update_available(
+                current_version=current_version,
+                latest_version=latest_version,
+                release_name=release_name,
+                checked_at=checked_at,
+            )
         else:
+            self._save_update_check_result(
+                status="up_to_date",
+                checked_at=checked_at,
+                current_version=current_version,
+                latest_version=latest_version,
+                release_name=release_name,
+            )
+
             self.settings_page.show_no_update(
-                current_version=current_version
+                current_version=current_version,
+                checked_at=checked_at,
             )
 
     def _update_check_failed(
         self,
         message: str,
     ) -> None:
-        """Display a failed update check."""
+        """Save and display a failed update check."""
+
+        checked_at = datetime.now().strftime(
+            "%d %B %Y, %H:%M"
+        )
+
+        self._save_update_check_result(
+            status="failed",
+            checked_at=checked_at,
+            current_version=APP_VERSION,
+            message=message,
+        )
 
         self.settings_page.show_update_failure(
-            message
+            current_version=APP_VERSION,
+            message=message,
+            checked_at=checked_at,
         )
 
     def _update_thread_finished(

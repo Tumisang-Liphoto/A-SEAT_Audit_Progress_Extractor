@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.utils.version import APP_VERSION
+
 
 class SettingsPage(QWidget):
     """Application settings page."""
@@ -243,7 +245,11 @@ class SettingsPage(QWidget):
         )
 
         self.update_status_label = QLabel(
-            "Update Status: Not checked"
+            (
+                f"Current version: {APP_VERSION}\n"
+                "Update status: Not checked\n"
+                "Last checked: Never"
+            )
         )
         self.update_status_label.setObjectName(
             "statusLabel"
@@ -383,6 +389,10 @@ class SettingsPage(QWidget):
             settings
         )
 
+        self.restore_update_status(
+            settings
+        )
+
     def restore_connection_status(
         self,
         settings: dict[str, Any],
@@ -472,6 +482,88 @@ class SettingsPage(QWidget):
         )
 
         self._set_connection_failure_style()
+
+    def restore_update_status(
+        self,
+        settings: dict[str, Any],
+    ) -> None:
+        """Restore the most recent update-check result."""
+
+        status = str(
+            settings.get(
+                "last_update_check_status",
+                "",
+            )
+        ).strip().lower()
+
+        checked_at = str(
+            settings.get(
+                "last_update_check_time",
+                "",
+            )
+        ).strip()
+
+        latest_version = str(
+            settings.get(
+                "last_update_check_latest_version",
+                "",
+            )
+        ).strip()
+
+        release_name = str(
+            settings.get(
+                "last_update_check_release_name",
+                "",
+            )
+        ).strip()
+
+        message = str(
+            settings.get(
+                "last_update_check_message",
+                "",
+            )
+        ).strip()
+
+        if not status:
+            self.update_status_label.setText(
+                (
+                    f"Current version: {APP_VERSION}\n"
+                    "Update status: Not checked\n"
+                    "Last checked: Never"
+                )
+            )
+
+            self.update_status_label.setStyleSheet(
+                """
+                QLabel {
+                    background-color: transparent;
+                    font-weight: 600;
+                }
+                """
+            )
+            return
+
+        if status == "up_to_date":
+            self.show_no_update(
+                current_version=APP_VERSION,
+                checked_at=checked_at,
+            )
+            return
+
+        if status == "update_available":
+            self.show_update_available(
+                current_version=APP_VERSION,
+                latest_version=latest_version or "Unknown",
+                release_name=release_name,
+                checked_at=checked_at,
+            )
+            return
+
+        self.show_update_failure(
+            current_version=APP_VERSION,
+            message=message or "The previous update check failed.",
+            checked_at=checked_at,
+        )
 
     def _system_url_changed(
         self,
@@ -776,7 +868,11 @@ class SettingsPage(QWidget):
 
         if busy:
             self.update_status_label.setText(
-                "Update Status: Checking GitHub..."
+                (
+                    f"Current version: {APP_VERSION}\n"
+                    "Update status: Checking GitHub...\n"
+                    "Last checked: In progress"
+                )
             )
 
             self.update_status_label.setStyleSheet(
@@ -792,6 +888,7 @@ class SettingsPage(QWidget):
     def show_no_update(
         self,
         current_version: str,
+        checked_at: str = "",
     ) -> None:
         """Show that the installed version is current."""
 
@@ -799,10 +896,13 @@ class SettingsPage(QWidget):
             False
         )
 
+        last_checked = checked_at or "Unknown"
+
         self.update_status_label.setText(
             (
-                "Update Status: Application is up to date\n"
-                f"Installed version: {current_version}"
+                f"Current version: {current_version}\n"
+                "Update status: Application is up to date\n"
+                f"Last checked: {last_checked}"
             )
         )
 
@@ -818,8 +918,10 @@ class SettingsPage(QWidget):
 
     def show_update_available(
         self,
+        current_version: str,
         latest_version: str,
         release_name: str,
+        checked_at: str = "",
     ) -> None:
         """Show that a newer release is available."""
 
@@ -827,9 +929,12 @@ class SettingsPage(QWidget):
             False
         )
 
+        last_checked = checked_at or "Unknown"
+
         status_text = (
-            "Update Status: Update available\n"
-            f"Latest version: {latest_version}"
+            f"Current version: {current_version}\n"
+            f"Update status: Version {latest_version} is available\n"
+            f"Last checked: {last_checked}"
         )
 
         if release_name:
@@ -853,7 +958,9 @@ class SettingsPage(QWidget):
 
     def show_update_failure(
         self,
+        current_version: str,
         message: str,
+        checked_at: str = "",
     ) -> None:
         """Show an update-check error."""
 
@@ -861,8 +968,15 @@ class SettingsPage(QWidget):
             False
         )
 
+        last_checked = checked_at or "Unknown"
+
         self.update_status_label.setText(
-            f"Update Status: Check failed\n{message}"
+            (
+                f"Current version: {current_version}\n"
+                "Update status: Check failed\n"
+                f"Last checked: {last_checked}\n"
+                f"{message}"
+            )
         )
 
         self.update_status_label.setStyleSheet(
