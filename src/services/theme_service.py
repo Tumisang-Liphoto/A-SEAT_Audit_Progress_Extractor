@@ -119,19 +119,35 @@ def _build_stylesheet(theme: dict[str, str]) -> str:
     """Build a complete Qt stylesheet from a theme colour palette."""
 
     high_contrast = theme["window_bg"] == "#000000"
-    border_width = "2px" if high_contrast else "1px"
-    border_radius = "4px" if high_contrast else "7px"
+
+    border_width = (
+        "2px"
+        if high_contrast
+        else "1px"
+    )
+
+    border_radius = (
+        "4px"
+        if high_contrast
+        else "7px"
+    )
 
     navigation_hover_text = (
-        "#000000" if high_contrast else "#ffffff"
+        "#000000"
+        if high_contrast
+        else "#ffffff"
     )
 
     button_hover_text = (
-        "#000000" if high_contrast else theme["button_text"]
+        "#000000"
+        if high_contrast
+        else theme["button_text"]
     )
 
     primary_hover_text = (
-        "#000000" if high_contrast else theme["primary_text"]
+        "#000000"
+        if high_contrast
+        else theme["primary_text"]
     )
 
     return f"""
@@ -294,6 +310,10 @@ QLineEdit::placeholder {{
 
 /* =========================================================
    COMBO BOXES
+
+   The drop-down and arrow subcontrols are intentionally not
+   customised. Qt's Fusion style therefore draws the native
+   arrow correctly on every theme.
    ========================================================= */
 
 QComboBox {{
@@ -303,9 +323,13 @@ QComboBox {{
     border-radius: {border_radius};
     min-height: 36px;
     padding-left: 10px;
-    padding-right: 36px;
+    padding-right: 10px;
     selection-background-color: {theme["primary"]};
     selection-color: {theme["primary_text"]};
+}}
+
+QComboBox:hover {{
+    border: {border_width} solid {theme["focus"]};
 }}
 
 QComboBox:focus {{
@@ -314,25 +338,6 @@ QComboBox:focus {{
 
 QComboBox:disabled {{
     color: {theme["muted_text"]};
-}}
-
-QComboBox::drop-down {{
-    subcontrol-origin: padding;
-    subcontrol-position: top right;
-    width: 32px;
-    background-color: {theme["button_bg"]};
-    border-left: {border_width} solid {theme["input_border"]};
-    border-top-right-radius: {border_radius};
-    border-bottom-right-radius: {border_radius};
-}}
-
-QComboBox::drop-down:hover {{
-    background-color: {theme["button_hover"]};
-}}
-
-QComboBox::down-arrow {{
-    width: 10px;
-    height: 10px;
 }}
 
 QComboBox QAbstractItemView {{
