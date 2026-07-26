@@ -2,6 +2,7 @@ from collections.abc import Callable
 from typing import Any
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.services.branding_service import BrandingService
 from src.utils.version import APP_VERSION
 
 
@@ -33,6 +35,9 @@ class SettingsPage(QWidget):
         on_check_updates: Callable[[], None],
         on_install_update: Callable[[], None],
         on_reset_application: Callable[[], None],
+        on_upload_logo: Callable[[str], None],
+        on_restore_default_logo: Callable[[], None],
+        branding_service: BrandingService,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -44,8 +49,12 @@ class SettingsPage(QWidget):
         self._on_check_updates = on_check_updates
         self._on_install_update = on_install_update
         self._on_reset_application = on_reset_application
+        self._on_upload_logo = on_upload_logo
+        self._on_restore_default_logo = on_restore_default_logo
+        self.branding_service = branding_service
 
         self._restoring_settings = False
+        self._use_custom_logo = False
         self._last_tested_url = ""
 
         self._build_interface()
@@ -370,6 +379,142 @@ class SettingsPage(QWidget):
             settings_card
         )
 
+        branding_card = QFrame()
+        branding_card.setObjectName("formCard")
+
+        branding_layout = QVBoxLayout(
+            branding_card
+        )
+        branding_layout.setContentsMargins(
+            24,
+            22,
+            24,
+            22,
+        )
+        branding_layout.setSpacing(12)
+
+        branding_heading = QLabel(
+            "Organisation Branding"
+        )
+        branding_heading.setObjectName(
+            "sectionHeading"
+        )
+
+        branding_description = QLabel(
+            "Upload your organisation's logo for the sidebar and "
+            "About page. AFROSAI-E attribution will remain visible "
+            "throughout the application."
+        )
+        branding_description.setObjectName(
+            "pageDescription"
+        )
+        branding_description.setWordWrap(
+            True
+        )
+
+        branding_content = QHBoxLayout()
+        branding_content.setSpacing(18)
+
+        self.logo_preview_label = QLabel()
+        self.logo_preview_label.setObjectName(
+            "brandingLogoPreview"
+        )
+        self.logo_preview_label.setFixedSize(
+            190,
+            120,
+        )
+        self.logo_preview_label.setAlignment(
+            Qt.AlignmentFlag.AlignCenter
+        )
+
+        branding_controls = QVBoxLayout()
+        branding_controls.setSpacing(9)
+
+        self.branding_status_label = QLabel(
+            "Using the default AFROSAI-E logo."
+        )
+        self.branding_status_label.setObjectName(
+            "statusLabel"
+        )
+        self.branding_status_label.setWordWrap(
+            True
+        )
+
+        branding_button_layout = QHBoxLayout()
+        branding_button_layout.setSpacing(8)
+
+        self.upload_logo_button = QPushButton(
+            "Upload Logo"
+        )
+        self.upload_logo_button.setMaximumWidth(
+            150
+        )
+        self.upload_logo_button.clicked.connect(
+            self._upload_logo
+        )
+
+        self.restore_logo_button = QPushButton(
+            "Restore Default"
+        )
+        self.restore_logo_button.setMaximumWidth(
+            160
+        )
+        self.restore_logo_button.clicked.connect(
+            self._restore_default_logo
+        )
+
+        branding_button_layout.addWidget(
+            self.upload_logo_button
+        )
+        branding_button_layout.addWidget(
+            self.restore_logo_button
+        )
+        branding_button_layout.addStretch()
+
+        branding_help = QLabel(
+            "Supported formats: PNG, JPG, JPEG and ICO. "
+            "A transparent PNG is recommended."
+        )
+        branding_help.setObjectName(
+            "pageDescription"
+        )
+        branding_help.setWordWrap(
+            True
+        )
+
+        branding_controls.addWidget(
+            self.branding_status_label
+        )
+        branding_controls.addLayout(
+            branding_button_layout
+        )
+        branding_controls.addWidget(
+            branding_help
+        )
+        branding_controls.addStretch()
+
+        branding_content.addWidget(
+            self.logo_preview_label
+        )
+        branding_content.addLayout(
+            branding_controls,
+            1,
+        )
+
+        branding_layout.addWidget(
+            branding_heading
+        )
+        branding_layout.addWidget(
+            branding_description
+        )
+        branding_layout.addLayout(
+            branding_content
+        )
+
+        layout.addWidget(
+            branding_card
+        )
+
         reset_card = QFrame()
         reset_card.setObjectName("formCard")
 
@@ -468,6 +613,12 @@ class SettingsPage(QWidget):
                 font-size: 15px;
                 font-weight: 700;
             }
+
+            QLabel#brandingLogoPreview {
+                background-color: palette(alternate-base);
+                border: 1px solid palette(mid);
+                border-radius: 10px;
+            }
             """
         )
 
@@ -547,6 +698,17 @@ class SettingsPage(QWidget):
                     True,
                 )
             )
+        )
+
+        self._use_custom_logo = bool(
+            settings.get(
+                "use_custom_logo",
+                False,
+            )
+        )
+
+        self.refresh_branding_preview(
+            self._use_custom_logo
         )
 
         self._restoring_settings = False
@@ -1337,6 +1499,178 @@ class SettingsPage(QWidget):
             """
         )
 
+    def _upload_logo(self) -> None:
+        """Select and install a custom organisation logo."""
+
+        selected_file, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Organisation Logo",
+            "",
+            (
+                "Image Files (*.png *.jpg *.jpeg *.ico);;"
+                "PNG Files (*.png);;"
+                "JPEG Files (*.jpg *.jpeg);;"
+                "Icon Files (*.ico)"
+            ),
+        )
+
+        if not selected_file:
+            return
+
+        try:
+            self._on_upload_logo(
+                selected_file
+            )
+
+            self._use_custom_logo = True
+
+            self.refresh_branding_preview(
+                True
+            )
+
+            QMessageBox.information(
+                self,
+                "Logo Updated",
+                (
+                    "The organisation logo has been updated "
+                    "successfully."
+                ),
+            )
+
+        except Exception as error:
+            QMessageBox.critical(
+                self,
+                "Logo Could Not Be Updated",
+                str(error),
+            )
+
+    def _restore_default_logo(self) -> None:
+        """Restore the built-in AFROSAI-E organisation logo."""
+
+        if not self._use_custom_logo:
+            QMessageBox.information(
+                self,
+                "Default Logo Active",
+                (
+                    "The default AFROSAI-E logo is already active."
+                ),
+            )
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Restore Default Logo",
+            (
+                "Remove the custom organisation logo and restore "
+                "the default AFROSAI-E logo?"
+            ),
+            (
+                QMessageBox.StandardButton.Yes
+                | QMessageBox.StandardButton.No
+            ),
+            QMessageBox.StandardButton.No,
+        )
+
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            self._on_restore_default_logo()
+
+            self._use_custom_logo = False
+
+            self.refresh_branding_preview(
+                False
+            )
+
+            QMessageBox.information(
+                self,
+                "Default Logo Restored",
+                (
+                    "The default AFROSAI-E logo has been restored."
+                ),
+            )
+
+        except Exception as error:
+            QMessageBox.critical(
+                self,
+                "Logo Could Not Be Restored",
+                str(error),
+            )
+
+    def refresh_branding_preview(
+        self,
+        use_custom_logo: bool,
+    ) -> None:
+        """Refresh the logo preview shown in Settings."""
+
+        self._use_custom_logo = bool(
+            use_custom_logo
+        )
+
+        try:
+            logo_path = (
+                self.branding_service.get_active_logo_path(
+                    use_custom_logo=(
+                        self._use_custom_logo
+                    )
+                )
+            )
+
+            pixmap = QPixmap(
+                str(logo_path)
+            )
+
+            if pixmap.isNull():
+                raise RuntimeError(
+                    "The active logo could not be displayed."
+                )
+
+            scaled = pixmap.scaled(
+                170,
+                100,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+
+            self.logo_preview_label.setText("")
+            self.logo_preview_label.setPixmap(
+                scaled
+            )
+
+            if (
+                self._use_custom_logo
+                and self.branding_service.has_custom_logo()
+            ):
+                self.branding_status_label.setText(
+                    "Using a custom organisation logo."
+                )
+                self.restore_logo_button.setEnabled(
+                    True
+                )
+            else:
+                self._use_custom_logo = False
+                self.branding_status_label.setText(
+                    "Using the default AFROSAI-E logo."
+                )
+                self.restore_logo_button.setEnabled(
+                    False
+                )
+
+        except Exception as error:
+            self.logo_preview_label.setPixmap(
+                QPixmap()
+            )
+            self.logo_preview_label.setText(
+                "Logo unavailable"
+            )
+            self.branding_status_label.setText(
+                str(error)
+            )
+            self.restore_logo_button.setEnabled(
+                False
+            )
+
     def _confirm_reset_application(
         self,
     ) -> None:
@@ -1347,6 +1681,7 @@ class SettingsPage(QWidget):
             "• saved application settings\n"
             "• the remembered username\n"
             "• extraction comparison history\n"
+            "• the uploaded organisation logo\n"
             "• Excel and CSV files registered as created by this application\n\n"
             "Unrelated files in the selected output folder will not be deleted.\n"
             "This action cannot be undone.\n\n"
@@ -1458,6 +1793,9 @@ class SettingsPage(QWidget):
             ),
             "ask_before_update": (
                 self.ask_before_update.isChecked()
+            ),
+            "use_custom_logo": (
+                self._use_custom_logo
             ),
         }
 

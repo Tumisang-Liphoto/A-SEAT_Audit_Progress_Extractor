@@ -2,6 +2,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from src.services.branding_service import BrandingService
 from src.services.generated_file_service import GeneratedFileService
 from src.utils.app_paths import config_folder
 
@@ -35,6 +36,14 @@ class ResetService:
 
         self.generated_file_service = (
             GeneratedFileService()
+        )
+
+        self.branding_service = (
+            BrandingService()
+        )
+
+        self.branding_folder = (
+            self.branding_service.branding_folder
         )
 
     def reset_application_data(
@@ -93,6 +102,13 @@ class ResetService:
 
         self._delete_folder(
             self.extraction_history_folder,
+            deleted_items,
+            missing_items,
+            failed_items,
+        )
+
+        self._delete_folder(
+            self.branding_folder,
             deleted_items,
             missing_items,
             failed_items,
@@ -192,6 +208,9 @@ class ResetService:
                 self.generated_file_service
                 .registry_file
                 .is_file()
+            ),
+            "custom_branding_exists": (
+                self.branding_folder.is_dir()
             ),
         }
 

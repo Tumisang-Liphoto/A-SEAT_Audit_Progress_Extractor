@@ -6,7 +6,8 @@ import shutil
 import subprocess
 import sys
 
-from PySide6.QtCore import QThread
+from PySide6.QtCore import QThread, QUrl
+from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -21,17 +22,19 @@ from src.core.connection_worker import ConnectionWorker
 from src.core.extraction_worker import ExtractionWorker
 from src.core.update_worker import UpdateWorker
 from src.gui.dialogs.login_dialog import LoginDialog
+from src.gui.pages.about_page import AboutPage
 from src.gui.pages.dashboard_page import DashboardPage
 from src.gui.pages.extraction_page import ExtractionPage
 from src.gui.pages.settings_page import SettingsPage
 from src.gui.widgets.sidebar import Sidebar
+from src.services.branding_service import BrandingService
 from src.services.browser_service import BrowserService
 from src.services.comparison_service import ComparisonService
 from src.services.generated_file_service import GeneratedFileService
 from src.services.reset_service import ResetService
 from src.services.settings_service import SettingsService
 from src.services.theme_service import apply_theme
-from src.utils.app_paths import application_folder
+from src.utils.app_paths import application_folder, config_folder
 from src.utils.version import APP_NAME, APP_VERSION
 
 
@@ -42,6 +45,7 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         self.settings_service = SettingsService()
+        self.branding_service = BrandingService()
         self.browser_service = BrowserService()
         self.comparison_service = ComparisonService()
         self.generated_file_service = GeneratedFileService()
@@ -68,16 +72,19 @@ class MainWindow(QMainWindow):
         self.connection_test_system_name = "A-SEAT"
 
         self.setWindowTitle(
-            f"{APP_NAME} - Version {APP_VERSION}"
+            APP_NAME
         )
         self.resize(1200, 760)
         self.setMinimumSize(950, 620)
 
         self._build_interface()
+        self._build_menu()
 
         self.settings_page.load_settings(
             self.current_settings
         )
+
+        self._refresh_branding_views()
 
         self._restore_dashboard_state()
 
@@ -128,6 +135,14 @@ class MainWindow(QMainWindow):
             self._check_for_updates,
             self._install_available_update,
             self._reset_application_data,
+            self._upload_custom_logo,
+            self._restore_default_logo,
+            self.branding_service,
+        )
+
+        self.about_page = AboutPage(
+            branding_service=self.branding_service,
+            organisation_name=self._system_name(),
         )
 
         self.page_stack.addWidget(
@@ -139,9 +154,19 @@ class MainWindow(QMainWindow):
         self.page_stack.addWidget(
             self.settings_page
         )
+        self.page_stack.addWidget(
+            self.about_page
+        )
 
         self.sidebar = Sidebar(
-            self._change_page
+            self._change_page,
+            branding_service=self.branding_service,
+            use_custom_logo=bool(
+                self.current_settings.get(
+                    "use_custom_logo",
+                    False,
+                )
+            ),
         )
 
         main_layout.addWidget(
@@ -154,6 +179,572 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(
             central_widget
+        )
+
+    def _refresh_branding_views(self) -> None:
+        """Refresh branding throughout the application."""
+
+        use_custom_logo = bool(
+            self.current_settings.get(
+                "use_custom_logo",
+                False,
+            )
+        )
+
+        self.sidebar.refresh_branding(
+            use_custom_logo=use_custom_logo
+        )
+
+        self.about_page.refresh_branding(
+            use_custom_logo=use_custom_logo,
+            organisation_name=self._system_name(),
+        )
+
+        self.settings_page.refresh_branding_preview(
+            use_custom_logo
+        )
+
+    def _upload_custom_logo(
+        self,
+        source_path: str,
+    ) -> None:
+        """Install and activate a custom organisation logo."""
+
+        self.branding_service.install_custom_logo(
+            source_path
+        )
+
+        self.current_settings[
+            "use_custom_logo"
+        ] = True
+
+        self.settings_service.save_settings(
+            self.current_settings
+        )
+
+        self._refresh_branding_views()
+
+    def _restore_default_logo(self) -> None:
+        """Remove custom branding and restore the default logo."""
+
+        self.branding_service.restore_default_logo()
+
+        self.current_settings[
+            "use_custom_logo"
+        ] = False
+
+        self.settings_service.save_settings(
+            self.current_settings
+        )
+
+        self._refresh_branding_views()
+
+    def _build_menu(self) -> None:
+        """Create the professional application menu bar."""
+
+        menu_bar = self.menuBar()
+        menu_bar.setNativeMenuBar(
+            False
+        )
+
+        file_menu = menu_bar.addMenu(
+            "&File"
+        )
+
+        self.open_latest_action = QAction(
+            "Open Latest Output",
+            self,
+        )
+        self.open_latest_action.setShortcut(
+            QKeySequence(
+                "Ctrl+O"
+            )
+        )
+        self.open_latest_action.setStatusTip(
+            "Open the most recent extraction output file."
+        )
+        self.open_latest_action.triggered.connect(
+            self._open_latest_output
+        )
+        file_menu.addAction(
+            self.open_latest_action
+        )
+
+        self.open_output_folder_action = QAction(
+            "Open Output Folder",
+            self,
+        )
+        self.open_output_folder_action.setShortcut(
+            QKeySequence(
+                "Ctrl+Shift+O"
+            )
+        )
+        self.open_output_folder_action.setStatusTip(
+            "Open the configured extraction output folder."
+        )
+        self.open_output_folder_action.triggered.connect(
+            self._open_output_folder
+        )
+        file_menu.addAction(
+            self.open_output_folder_action
+        )
+
+        file_menu.addSeparator()
+
+        exit_action = QAction(
+            "Exit",
+            self,
+        )
+        exit_action.setShortcut(
+            QKeySequence(
+                "Alt+F4"
+            )
+        )
+        exit_action.triggered.connect(
+            self.close
+        )
+        file_menu.addAction(
+            exit_action
+        )
+
+        extraction_menu = menu_bar.addMenu(
+            "&Extraction"
+        )
+
+        extract_progress_action = QAction(
+            "Extract Progress",
+            self,
+        )
+        extract_progress_action.setShortcut(
+            QKeySequence(
+                "Ctrl+E"
+            )
+        )
+        extract_progress_action.setStatusTip(
+            "Open the extraction page."
+        )
+        extract_progress_action.triggered.connect(
+            lambda: self._change_page(1)
+        )
+        extraction_menu.addAction(
+            extract_progress_action
+        )
+
+        open_system_action = QAction(
+            "Open A-SEAT",
+            self,
+        )
+        open_system_action.setShortcut(
+            QKeySequence(
+                "Ctrl+Shift+E"
+            )
+        )
+        open_system_action.setStatusTip(
+            "Open the configured A-SEAT system in the default browser."
+        )
+        open_system_action.triggered.connect(
+            self._open_system
+        )
+        extraction_menu.addAction(
+            open_system_action
+        )
+
+        view_menu = menu_bar.addMenu(
+            "&View"
+        )
+
+        navigation_actions = [
+            (
+                "Dashboard",
+                "Ctrl+1",
+                0,
+            ),
+            (
+                "Extract Progress",
+                "Ctrl+2",
+                1,
+            ),
+            (
+                "Settings",
+                "Ctrl+3",
+                2,
+            ),
+            (
+                "About",
+                "Ctrl+4",
+                3,
+            ),
+        ]
+
+        for (
+            label,
+            shortcut,
+            page_index,
+        ) in navigation_actions:
+            action = QAction(
+                label,
+                self,
+            )
+            action.setShortcut(
+                QKeySequence(
+                    shortcut
+                )
+            )
+            action.triggered.connect(
+                lambda checked=False, index=page_index: (
+                    self._change_page(
+                        index
+                    )
+                )
+            )
+            view_menu.addAction(
+                action
+            )
+
+        view_menu.addSeparator()
+
+        self.toggle_sidebar_action = QAction(
+            "Hide Sidebar",
+            self,
+        )
+        self.toggle_sidebar_action.setShortcut(
+            QKeySequence(
+                "Ctrl+B"
+            )
+        )
+        self.toggle_sidebar_action.triggered.connect(
+            self._toggle_sidebar
+        )
+        view_menu.addAction(
+            self.toggle_sidebar_action
+        )
+
+        tools_menu = menu_bar.addMenu(
+            "&Tools"
+        )
+
+        test_connection_action = QAction(
+            "Test System Connection",
+            self,
+        )
+        test_connection_action.setStatusTip(
+            "Run the configured system connection test."
+        )
+        test_connection_action.triggered.connect(
+            self._menu_test_connection
+        )
+        tools_menu.addAction(
+            test_connection_action
+        )
+
+        check_updates_action = QAction(
+            "Check for Updates",
+            self,
+        )
+        check_updates_action.setShortcut(
+            QKeySequence(
+                "Ctrl+U"
+            )
+        )
+        check_updates_action.triggered.connect(
+            self._menu_check_updates
+        )
+        tools_menu.addAction(
+            check_updates_action
+        )
+
+        tools_menu.addSeparator()
+
+        open_data_folder_action = QAction(
+            "Open Application Data Folder",
+            self,
+        )
+        open_data_folder_action.triggered.connect(
+            self._open_application_data_folder
+        )
+        tools_menu.addAction(
+            open_data_folder_action
+        )
+
+        tools_menu.addSeparator()
+
+        reset_action = QAction(
+            "Reset Application Data",
+            self,
+        )
+        reset_action.triggered.connect(
+            self._menu_reset_application
+        )
+        tools_menu.addAction(
+            reset_action
+        )
+
+        help_menu = menu_bar.addMenu(
+            "&Help"
+        )
+
+        shortcuts_action = QAction(
+            "Keyboard Shortcuts",
+            self,
+        )
+        shortcuts_action.setShortcut(
+            QKeySequence(
+                "F1"
+            )
+        )
+        shortcuts_action.triggered.connect(
+            self._show_keyboard_shortcuts
+        )
+        help_menu.addAction(
+            shortcuts_action
+        )
+
+        help_menu.addSeparator()
+
+        about_action = QAction(
+            f"About {APP_NAME}",
+            self,
+        )
+        about_action.triggered.connect(
+            lambda: self._change_page(3)
+        )
+        help_menu.addAction(
+            about_action
+        )
+
+        menu_bar.setStyleSheet(
+            """
+            QMenuBar {
+                background-color: palette(window);
+                color: palette(window-text);
+                border-bottom: 1px solid palette(mid);
+                padding: 3px 6px;
+            }
+
+            QMenuBar::item {
+                background-color: transparent;
+                padding: 7px 12px;
+                border-radius: 5px;
+            }
+
+            QMenuBar::item:selected {
+                background-color: palette(alternate-base);
+            }
+
+            QMenu {
+                background-color: palette(base);
+                color: palette(text);
+                border: 1px solid palette(mid);
+                padding: 6px;
+            }
+
+            QMenu::item {
+                padding: 8px 34px 8px 12px;
+                border-radius: 5px;
+            }
+
+            QMenu::item:selected {
+                background-color: palette(highlight);
+                color: palette(highlighted-text);
+            }
+
+            QMenu::separator {
+                height: 1px;
+                background-color: palette(mid);
+                margin: 5px 8px;
+            }
+            """
+        )
+
+    def _toggle_sidebar(self) -> None:
+        """Show or hide the navigation sidebar."""
+
+        should_show = (
+            not self.sidebar.isVisible()
+        )
+
+        self.sidebar.setVisible(
+            should_show
+        )
+
+        self.toggle_sidebar_action.setText(
+            (
+                "Hide Sidebar"
+                if should_show
+                else "Show Sidebar"
+            )
+        )
+
+    def _open_latest_output(self) -> None:
+        """Open the latest extraction output file."""
+
+        latest_output = Path(
+            str(
+                self.current_settings.get(
+                    "latest_output_file",
+                    "",
+                )
+            ).strip()
+        )
+
+        if not str(
+            latest_output
+        ).strip() or not latest_output.is_file():
+            QMessageBox.warning(
+                self,
+                "Latest Output Not Available",
+                (
+                    "No latest output file is available. "
+                    "Run an extraction first or confirm that the "
+                    "previous file has not been moved or deleted."
+                ),
+            )
+            return
+
+        opened = QDesktopServices.openUrl(
+            QUrl.fromLocalFile(
+                str(
+                    latest_output.resolve()
+                )
+            )
+        )
+
+        if not opened:
+            QMessageBox.critical(
+                self,
+                "Unable to Open Output",
+                (
+                    "The latest output could not be opened "
+                    "with the default application."
+                ),
+            )
+
+    def _open_output_folder(self) -> None:
+        """Open the configured output folder."""
+
+        output_folder = Path(
+            str(
+                self.current_settings.get(
+                    "output_folder",
+                    "",
+                )
+            ).strip()
+        )
+
+        if not str(
+            output_folder
+        ).strip() or not output_folder.is_dir():
+            QMessageBox.warning(
+                self,
+                "Output Folder Not Available",
+                (
+                    "Open Settings and select a valid output folder."
+                ),
+            )
+            self._change_page(
+                2
+            )
+            return
+
+        opened = QDesktopServices.openUrl(
+            QUrl.fromLocalFile(
+                str(
+                    output_folder.resolve()
+                )
+            )
+        )
+
+        if not opened:
+            QMessageBox.critical(
+                self,
+                "Unable to Open Folder",
+                "The configured output folder could not be opened.",
+            )
+
+    def _open_application_data_folder(self) -> None:
+        """Open the local application data folder."""
+
+        data_folder = config_folder()
+
+        try:
+            data_folder.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+        except OSError as error:
+            QMessageBox.critical(
+                self,
+                "Application Data Folder",
+                (
+                    "The application data folder could not be created."
+                    f"\n\n{error}"
+                ),
+            )
+            return
+
+        opened = QDesktopServices.openUrl(
+            QUrl.fromLocalFile(
+                str(
+                    data_folder.resolve()
+                )
+            )
+        )
+
+        if not opened:
+            QMessageBox.critical(
+                self,
+                "Unable to Open Folder",
+                "The application data folder could not be opened.",
+            )
+
+    def _menu_test_connection(self) -> None:
+        """Navigate to Settings and start the connection test."""
+
+        self._change_page(
+            2
+        )
+
+        self.settings_page.test_connection_button.click()
+
+    def _menu_check_updates(self) -> None:
+        """Navigate to Settings and check for updates."""
+
+        self._change_page(
+            2
+        )
+
+        self.settings_page.check_updates_button.click()
+
+    def _menu_reset_application(self) -> None:
+        """Navigate to Settings and show the reset confirmation."""
+
+        self._change_page(
+            2
+        )
+
+        self.settings_page.reset_application_button.click()
+
+    def _show_keyboard_shortcuts(self) -> None:
+        """Display the available application shortcuts."""
+
+        QMessageBox.information(
+            self,
+            "Keyboard Shortcuts",
+            (
+                "Navigation\n"
+                "Ctrl+1    Dashboard\n"
+                "Ctrl+2    Extract Progress\n"
+                "Ctrl+3    Settings\n"
+                "Ctrl+4    About\n\n"
+                "Application\n"
+                "Ctrl+E    Open Extract Progress\n"
+                "Ctrl+O    Open latest output\n"
+                "Ctrl+Shift+O    Open output folder\n"
+                "Ctrl+B    Show or hide the sidebar\n"
+                "Ctrl+U    Check for updates\n"
+                "F1        Show keyboard shortcuts\n"
+                "Alt+F4    Exit"
+            ),
         )
 
     def _restore_dashboard_state(self) -> None:
@@ -496,6 +1087,25 @@ class MainWindow(QMainWindow):
 
         self.extraction_page.set_system_name(
             self._system_name()
+        )
+
+        self.about_page.refresh_branding(
+            use_custom_logo=bool(
+                self.current_settings.get(
+                    "use_custom_logo",
+                    False,
+                )
+            ),
+            organisation_name=self._system_name(),
+        )
+
+        self.sidebar.refresh_branding(
+            use_custom_logo=bool(
+                self.current_settings.get(
+                    "use_custom_logo",
+                    False,
+                )
+            )
         )
 
         self.settings_service.save_settings(
