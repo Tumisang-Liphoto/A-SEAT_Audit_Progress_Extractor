@@ -31,7 +31,6 @@ class SettingsPage(QWidget):
     def __init__(
         self,
         on_save_settings: Callable[[dict[str, Any]], None],
-        on_test_connection: Callable[[str], None],
         on_check_updates: Callable[[], None],
         on_install_update: Callable[[], None],
         on_reset_application: Callable[[], None],
@@ -45,7 +44,6 @@ class SettingsPage(QWidget):
         self.setObjectName("contentPage")
 
         self._on_save_settings = on_save_settings
-        self._on_test_connection = on_test_connection
         self._on_check_updates = on_check_updates
         self._on_install_update = on_install_update
         self._on_reset_application = on_reset_application
@@ -53,9 +51,7 @@ class SettingsPage(QWidget):
         self._on_restore_default_logo = on_restore_default_logo
         self.branding_service = branding_service
 
-        self._restoring_settings = False
         self._use_custom_logo = False
-        self._last_tested_url = ""
 
         self._build_interface()
 
@@ -94,8 +90,8 @@ class SettingsPage(QWidget):
         heading.setObjectName("pageHeading")
 
         description = QLabel(
-            "Configure appearance, system access, exports "
-            "and automatic application updates."
+            "Configure appearance, exports, branding, updates "
+            "and local application data."
         )
         description.setObjectName("pageDescription")
         description.setWordWrap(True)
@@ -125,62 +121,6 @@ class SettingsPage(QWidget):
                 "Blue",
                 "High Contrast",
             ]
-        )
-
-        self.system_name_input = QLineEdit()
-        self.system_name_input.setPlaceholderText(
-            "Enter your organisation's system name"
-        )
-        self.system_name_input.setClearButtonEnabled(
-            True
-        )
-
-        self.system_url_input = QLineEdit()
-        self.system_url_input.setPlaceholderText(
-            "For example: "
-            "http://10.1.6.133/system/dashboard/"
-        )
-        self.system_url_input.textChanged.connect(
-            self._system_url_changed
-        )
-
-        connection_widget = QWidget()
-        connection_layout = QVBoxLayout(
-            connection_widget
-        )
-        connection_layout.setContentsMargins(
-            0,
-            0,
-            0,
-            0,
-        )
-        connection_layout.setSpacing(7)
-
-        self.test_connection_button = QPushButton(
-            "Test Connection"
-        )
-        self.test_connection_button.setMaximumWidth(
-            160
-        )
-        self.test_connection_button.clicked.connect(
-            self._test_connection
-        )
-
-        self.connection_status_label = QLabel(
-            "Connection Status: Not tested"
-        )
-        self.connection_status_label.setObjectName(
-            "statusLabel"
-        )
-        self.connection_status_label.setWordWrap(
-            True
-        )
-
-        connection_layout.addWidget(
-            self.test_connection_button
-        )
-        connection_layout.addWidget(
-            self.connection_status_label
         )
 
         output_folder_widget = QWidget()
@@ -230,18 +170,6 @@ class SettingsPage(QWidget):
         form.addRow(
             "Theme:",
             self.theme_combo,
-        )
-        form.addRow(
-            "System name:",
-            self.system_name_input,
-        )
-        form.addRow(
-            "System URL:",
-            self.system_url_input,
-        )
-        form.addRow(
-            "",
-            connection_widget,
         )
         form.addRow(
             "Output folder:",
@@ -628,8 +556,6 @@ class SettingsPage(QWidget):
     ) -> None:
         """Load and display saved settings."""
 
-        self._restoring_settings = True
-
         theme_name = str(
             settings.get(
                 "theme",
@@ -645,24 +571,6 @@ class SettingsPage(QWidget):
             self.theme_combo.setCurrentIndex(
                 theme_index
             )
-
-        self.system_name_input.setText(
-            str(
-                settings.get(
-                    "system_name",
-                    "A-SEAT",
-                )
-            )
-        )
-
-        self.system_url_input.setText(
-            str(
-                settings.get(
-                    "aseat_url",
-                    "",
-                )
-            )
-        )
 
         self.output_folder_input.setText(
             str(
@@ -711,105 +619,10 @@ class SettingsPage(QWidget):
             self._use_custom_logo
         )
 
-        self._restoring_settings = False
-
-        self.restore_connection_status(
-            settings
-        )
 
         self.restore_update_status(
             settings
         )
-
-    def restore_connection_status(
-        self,
-        settings: dict[str, Any],
-    ) -> None:
-        """Restore the saved connection-test result."""
-
-        current_url = self._normalise_url(
-            self.system_url_input.text()
-        )
-
-        tested_url = self._normalise_url(
-            str(
-                settings.get(
-                    "connection_tested_url",
-                    "",
-                )
-            )
-        )
-
-        self._last_tested_url = tested_url
-
-        test_status = str(
-            settings.get(
-                "connection_test_status",
-                "",
-            )
-        ).lower()
-
-        tested_at = str(
-            settings.get(
-                "connection_tested_at",
-                "",
-            )
-        ).strip()
-
-        message = str(
-            settings.get(
-                "connection_test_message",
-                "",
-            )
-        ).strip()
-
-        if not test_status or not tested_url:
-            self.show_connection_not_tested()
-            return
-
-        if current_url != tested_url:
-            self.show_connection_not_tested(
-                different_address=True
-            )
-            return
-
-        if test_status == "successful":
-            status_text = (
-                "Connection Status: "
-                "Last test successful"
-            )
-
-            if tested_at:
-                status_text += (
-                    f"\nLast tested: {tested_at}"
-                )
-
-            self.connection_status_label.setText(
-                status_text
-            )
-
-            self._set_connection_success_style()
-            return
-
-        status_text = (
-            "Connection Status: Last test failed"
-        )
-
-        if tested_at:
-            status_text += (
-                f"\nLast tested: {tested_at}"
-            )
-
-        if message:
-            status_text += (
-                f"\n{message}"
-            )
-
-        self.connection_status_label.setText(
-            status_text
-        )
-
-        self._set_connection_failure_style()
 
     def restore_update_status(
         self,
@@ -899,282 +712,6 @@ class SettingsPage(QWidget):
             current_version=APP_VERSION,
             message=message or "The previous update check failed.",
             checked_at=checked_at,
-        )
-
-    def _system_url_changed(
-        self,
-        new_url: str,
-    ) -> None:
-        """Reset the test result when the URL changes."""
-
-        if self._restoring_settings:
-            return
-
-        normalised_url = self._normalise_url(
-            new_url
-        )
-
-        if (
-            self._last_tested_url
-            and normalised_url
-            == self._last_tested_url
-        ):
-            return
-
-        self.show_connection_not_tested(
-            different_address=bool(
-                normalised_url
-            )
-        )
-
-    def _test_connection(self) -> None:
-        system_name = (
-            self.system_name_input.text().strip()
-        )
-
-        system_url = (
-            self.system_url_input.text().strip()
-        )
-
-        if not system_name:
-            QMessageBox.warning(
-                self,
-                "System Name Required",
-                "Enter the name of your system.",
-            )
-
-            self.system_name_input.setFocus()
-            return
-
-        if not system_url:
-            QMessageBox.warning(
-                self,
-                "System Address Required",
-                (
-                    f"Enter the {system_name} URL before "
-                    "testing the connection."
-                ),
-            )
-
-            self.system_url_input.setFocus()
-            return
-
-        self.set_connection_test_busy(
-            True
-        )
-
-        self._on_test_connection(
-            system_url
-        )
-
-    def set_connection_test_busy(
-        self,
-        busy: bool,
-    ) -> None:
-        self.test_connection_button.setEnabled(
-            not busy
-        )
-
-        self.system_url_input.setEnabled(
-            not busy
-        )
-
-        self.system_name_input.setEnabled(
-            not busy
-        )
-
-        self.test_connection_button.setText(
-            "Testing..."
-            if busy
-            else "Test Connection"
-        )
-
-        if busy:
-            self.connection_status_label.setText(
-                "Connection Status: Testing..."
-            )
-
-            self.connection_status_label.setStyleSheet(
-                """
-                QLabel {
-                    color: #d97706;
-                    background-color: transparent;
-                    font-weight: 600;
-                }
-                """
-            )
-
-    def show_connection_success(
-        self,
-        result: dict[str, Any],
-        tested_at: str = "",
-        tested_url: str = "",
-    ) -> None:
-        self.set_connection_test_busy(
-            False
-        )
-
-        self._last_tested_url = (
-            self._normalise_url(
-                tested_url
-                or self.system_url_input.text()
-            )
-        )
-
-        status_text = (
-            "Connection Status: Successful"
-        )
-
-        if tested_at:
-            status_text += (
-                f"\nLast tested: {tested_at}"
-            )
-
-        self.connection_status_label.setText(
-            status_text
-        )
-
-        self._set_connection_success_style()
-
-    def show_connection_warning(
-        self,
-        result: dict[str, Any],
-        tested_at: str = "",
-        tested_url: str = "",
-    ) -> None:
-        self.set_connection_test_busy(
-            False
-        )
-
-        self._last_tested_url = (
-            self._normalise_url(
-                tested_url
-                or self.system_url_input.text()
-            )
-        )
-
-        system_name = (
-            self.system_name_input.text().strip()
-            or "A-SEAT"
-        )
-
-        message = str(
-            result.get(
-                "message",
-                (
-                    f"The {system_name} login page "
-                    "was not confirmed."
-                ),
-            )
-        )
-
-        status_text = (
-            "Connection Status: Failed"
-        )
-
-        if tested_at:
-            status_text += (
-                f"\nLast tested: {tested_at}"
-            )
-
-        status_text += (
-            f"\n{message}"
-        )
-
-        self.connection_status_label.setText(
-            status_text
-        )
-
-        self._set_connection_failure_style()
-
-    def show_connection_failure(
-        self,
-        message: str,
-        tested_at: str = "",
-        tested_url: str = "",
-    ) -> None:
-        self.set_connection_test_busy(
-            False
-        )
-
-        self._last_tested_url = (
-            self._normalise_url(
-                tested_url
-                or self.system_url_input.text()
-            )
-        )
-
-        status_text = (
-            "Connection Status: Failed"
-        )
-
-        if tested_at:
-            status_text += (
-                f"\nLast tested: {tested_at}"
-            )
-
-        if message:
-            status_text += (
-                f"\n{message}"
-            )
-
-        self.connection_status_label.setText(
-            status_text
-        )
-
-        self._set_connection_failure_style()
-
-    def show_connection_not_tested(
-        self,
-        different_address: bool = False,
-    ) -> None:
-        self.set_connection_test_busy(
-            False
-        )
-
-        if different_address:
-            text = (
-                "Connection Status: "
-                "Not tested for this address"
-            )
-        else:
-            text = (
-                "Connection Status: Not tested"
-            )
-
-        self.connection_status_label.setText(
-            text
-        )
-
-        self.connection_status_label.setStyleSheet(
-            """
-            QLabel {
-                background-color: transparent;
-                font-weight: 600;
-            }
-            """
-        )
-
-    def _set_connection_success_style(self) -> None:
-        self.connection_status_label.setStyleSheet(
-            """
-            QLabel {
-                color: #15803d;
-                background-color: transparent;
-                font-weight: 700;
-            }
-            """
-        )
-
-    def _set_connection_failure_style(self) -> None:
-        self.connection_status_label.setStyleSheet(
-            """
-            QLabel {
-                color: #dc2626;
-                background-color: transparent;
-                font-weight: 700;
-            }
-            """
         )
 
     def _check_for_updates(self) -> None:
@@ -1679,7 +1216,8 @@ class SettingsPage(QWidget):
         warning_message = (
             "This will permanently delete:\n\n"
             "• saved application settings\n"
-            "• the remembered username\n"
+            "• connection profiles and saved credentials\n"
+            "• the local user profile\n"
             "• extraction comparison history\n"
             "• the uploaded organisation logo\n"
             "• Excel and CSV files registered as created by this application\n\n"
@@ -1760,27 +1298,11 @@ class SettingsPage(QWidget):
         )
 
     def _save_settings(self) -> None:
-        system_name = (
-            self.system_name_input.text().strip()
-        )
-
-        if not system_name:
-            QMessageBox.warning(
-                self,
-                "System Name Required",
-                "Enter the name of your system.",
-            )
-
-            self.system_name_input.setFocus()
-            return
+        """Save application preferences."""
 
         settings: dict[str, Any] = {
             "theme": (
                 self.theme_combo.currentText()
-            ),
-            "system_name": system_name,
-            "aseat_url": (
-                self.system_url_input.text().strip()
             ),
             "output_folder": (
                 self.output_folder_input.text().strip()

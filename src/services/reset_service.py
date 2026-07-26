@@ -3,17 +3,24 @@ from pathlib import Path
 from typing import Any
 
 from src.services.branding_service import BrandingService
+from src.services.connection_profile_service import (
+    ConnectionProfileService,
+)
+from src.services.connection_state_service import (
+    ConnectionStateService,
+)
 from src.services.generated_file_service import GeneratedFileService
+from src.services.user_profile_service import UserProfileService
 from src.utils.app_paths import config_folder
 
 
 class ResetService:
     """
-    Resets locally stored application data.
+    Reset application-owned data safely.
 
-    The service deletes only files that belong to the application:
-    registered exports, saved settings, extraction snapshots and the
-    generated-file registry.
+    The reset removes registered exports, settings, extraction
+    snapshots, branding, connection profiles and saved A-SEAT
+    credentials. Unknown files are never deleted.
     """
 
     def __init__(self) -> None:
@@ -27,6 +34,36 @@ class ResetService:
         self.settings_temp_file = (
             self.config_folder
             / "user_settings.json.tmp"
+        )
+
+        self.connection_profile_service = (
+            ConnectionProfileService()
+        )
+
+        self.connection_state_service = (
+            ConnectionStateService()
+        )
+
+        self.connection_profiles_file = (
+            self.connection_profile_service.file_path
+        )
+
+        self.connection_profiles_temp_file = (
+            self.connection_profiles_file.with_suffix(
+                ".json.tmp"
+            )
+        )
+
+        self.user_profile_service = UserProfileService()
+
+        self.user_profile_file = (
+            self.user_profile_service.profile_file
+        )
+
+        self.user_profile_temp_file = (
+            self.user_profile_file.with_suffix(
+                ".json.tmp"
+            )
         )
 
         self.extraction_history_folder = (
@@ -50,16 +87,37 @@ class ResetService:
         self,
     ) -> dict[str, Any]:
         """
-        Delete application configuration, extraction history and
-        registered output files.
+        Delete application configuration and registered outputs.
 
-        A result dictionary is returned so the GUI can show exactly
-        what was deleted and whether any items could not be removed.
+        Saved credentials are deleted from Windows Credential Manager
+        before their connection-profile metadata is removed.
         """
 
         deleted_items: list[str] = []
         missing_items: list[str] = []
         failed_items: list[dict[str, str]] = []
+
+        credential_result = (
+            self._delete_saved_credentials()
+        )
+
+        for failed_credential in credential_result.get(
+            "failed_items",
+            [],
+        ):
+            failed_items.append(
+                {
+                    "path": (
+                        "Windows Credential Manager"
+                    ),
+                    "error": str(
+                        failed_credential.get(
+                            "error",
+                            "Credential deletion failed.",
+                        )
+                    ),
+                }
+            )
 
         generated_result = (
             self._delete_registered_output_files()
@@ -95,6 +153,34 @@ class ResetService:
 
         self._delete_file(
             self.settings_temp_file,
+            deleted_items,
+            missing_items,
+            failed_items,
+        )
+
+        self._delete_file(
+            self.connection_profiles_file,
+            deleted_items,
+            missing_items,
+            failed_items,
+        )
+
+        self._delete_file(
+            self.connection_profiles_temp_file,
+            deleted_items,
+            missing_items,
+            failed_items,
+        )
+
+        self._delete_file(
+            self.user_profile_file,
+            deleted_items,
+            missing_items,
+            failed_items,
+        )
+
+        self._delete_file(
+            self.user_profile_temp_file,
             deleted_items,
             missing_items,
             failed_items,
@@ -136,6 +222,18 @@ class ResetService:
             "deleted_items": deleted_items,
             "missing_items": missing_items,
             "failed_items": failed_items,
+            "credentials_deleted": int(
+                credential_result.get(
+                    "deleted_count",
+                    0,
+                )
+            ),
+            "credentials_failed": len(
+                credential_result.get(
+                    "failed_items",
+                    [],
+                )
+            ),
             "generated_files_deleted": int(
                 generated_result.get(
                     "deleted_count",
@@ -160,9 +258,9 @@ class ResetService:
         self,
     ) -> dict[str, Any]:
         """
-        Return a summary of the data that would be removed.
+        Return a non-destructive summary of data to be removed.
 
-        This method does not delete anything.
+        This method does not retrieve, expose or delete passwords.
         """
 
         registered_files = (
@@ -193,6 +291,26 @@ class ResetService:
             except OSError:
                 snapshot_count = 0
 
+        profile_data = (
+            self.connection_profile_service.load()
+        )
+
+        profiles = profile_data.get(
+            "profiles",
+            [],
+        )
+
+        credential_metadata_count = sum(
+            1
+            for profile in profiles
+            if str(
+                profile.get(
+                    "credential_expires_at",
+                    "",
+                )
+            ).strip()
+        )
+
         return {
             "registered_file_count": len(
                 registered_files
@@ -212,7 +330,42 @@ class ResetService:
             "custom_branding_exists": (
                 self.branding_folder.is_dir()
             ),
+            "connection_profile_count": len(
+                profiles
+            ),
+            "saved_credential_count": (
+                credential_metadata_count
+            ),
+            "connection_profiles_exist": (
+                self.connection_profiles_file.is_file()
+            ),
+            "user_profile_exists": (
+                self.user_profile_file.is_file()
+            ),
         }
+
+    def _delete_saved_credentials(
+        self,
+    ) -> dict[str, Any]:
+        """Delete all known A-SEAT credentials securely."""
+
+        try:
+            return (
+                self.connection_state_service
+                .disconnect_all()
+            )
+
+        except Exception as error:
+            return {
+                "success": False,
+                "deleted_count": 0,
+                "failed_items": [
+                    {
+                        "profile_id": "",
+                        "error": str(error),
+                    }
+                ],
+            }
 
     def _delete_registered_output_files(
         self,
@@ -249,12 +402,7 @@ class ResetService:
         missing_items: list[str],
         failed_items: list[dict[str, str]],
     ) -> None:
-        """
-        Remove the registry if output deletion left it behind.
-
-        The registry normally deletes itself, but this provides a
-        final cleanup attempt.
-        """
+        """Remove a registry left behind after output deletion."""
 
         registry_file = (
             self.generated_file_service
@@ -278,7 +426,7 @@ class ResetService:
         missing_items: list[str],
         failed_items: list[dict[str, str]],
     ) -> None:
-        """Delete one application-owned file."""
+        """Delete one known application-owned file."""
 
         if not file_path.exists():
             missing_items.append(
@@ -319,7 +467,7 @@ class ResetService:
         missing_items: list[str],
         failed_items: list[dict[str, str]],
     ) -> None:
-        """Delete one application-owned folder recursively."""
+        """Delete one known application-owned folder recursively."""
 
         if not folder_path.exists():
             missing_items.append(

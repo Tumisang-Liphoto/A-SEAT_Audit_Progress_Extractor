@@ -18,22 +18,28 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.core.authentication_worker import AuthenticationWorker
 from src.core.connection_worker import ConnectionWorker
 from src.core.extraction_worker import ExtractionWorker
 from src.core.update_worker import UpdateWorker
 from src.gui.dialogs.login_dialog import LoginDialog
 from src.gui.pages.about_page import AboutPage
+from src.gui.pages.connection_page import ConnectionPage
 from src.gui.pages.dashboard_page import DashboardPage
 from src.gui.pages.extraction_page import ExtractionPage
 from src.gui.pages.settings_page import SettingsPage
+from src.gui.pages.user_profile_page import UserProfilePage
 from src.gui.widgets.sidebar import Sidebar
 from src.services.branding_service import BrandingService
 from src.services.browser_service import BrowserService
 from src.services.comparison_service import ComparisonService
+from src.services.connection_profile_service import ConnectionProfileService
+from src.services.connection_state_service import ConnectionStateService
 from src.services.generated_file_service import GeneratedFileService
 from src.services.reset_service import ResetService
 from src.services.settings_service import SettingsService
 from src.services.theme_service import apply_theme
+from src.services.user_profile_service import UserProfileService
 from src.utils.app_paths import application_folder, config_folder
 from src.utils.version import APP_NAME, APP_VERSION
 
@@ -50,9 +56,16 @@ class MainWindow(QMainWindow):
         self.comparison_service = ComparisonService()
         self.generated_file_service = GeneratedFileService()
         self.reset_service = ResetService()
+        self.user_profile_service = UserProfileService()
+        self.connection_profile_service = ConnectionProfileService()
+        self.connection_state_service = ConnectionStateService()
 
         self.current_settings = (
             self.settings_service.load_settings()
+        )
+
+        self.current_user_profile = (
+            self.user_profile_service.load_profile()
         )
 
         self.extraction_thread: QThread | None = None
@@ -60,6 +73,13 @@ class MainWindow(QMainWindow):
 
         self.connection_thread: QThread | None = None
         self.connection_worker: ConnectionWorker | None = None
+        self.connection_test_target = "settings"
+
+        self.authentication_thread: QThread | None = None
+        self.authentication_worker: AuthenticationWorker | None = None
+        self.pending_authentication_profile: dict[str, Any] = {}
+        self.pending_authentication_password = ""
+        self.pending_authentication_remember = False
 
         self.update_thread: QThread | None = None
         self.update_worker: UpdateWorker | None = None
@@ -83,6 +103,12 @@ class MainWindow(QMainWindow):
         self.settings_page.load_settings(
             self.current_settings
         )
+
+        self.user_profile_page.load_profile(
+            self.current_user_profile
+        )
+
+        self._load_connection_page()
 
         self._refresh_branding_views()
 
@@ -131,7 +157,6 @@ class MainWindow(QMainWindow):
 
         self.settings_page = SettingsPage(
             self._save_settings,
-            self._test_system_connection,
             self._check_for_updates,
             self._install_available_update,
             self._reset_application_data,
@@ -145,6 +170,18 @@ class MainWindow(QMainWindow):
             organisation_name=self._system_name(),
         )
 
+        self.user_profile_page = UserProfilePage(
+            self._save_user_profile
+        )
+
+        self.connection_page = ConnectionPage(
+            self._save_connection_profile_from_page,
+            self._test_connection_from_page,
+            self._authenticate_connection_profile,
+            self._disconnect_active_profile,
+            self._open_system,
+        )
+
         self.page_stack.addWidget(
             self.dashboard_page
         )
@@ -156,6 +193,12 @@ class MainWindow(QMainWindow):
         )
         self.page_stack.addWidget(
             self.about_page
+        )
+        self.page_stack.addWidget(
+            self.user_profile_page
+        )
+        self.page_stack.addWidget(
+            self.connection_page
         )
 
         self.sidebar = Sidebar(
@@ -360,18 +403,28 @@ class MainWindow(QMainWindow):
                 0,
             ),
             (
-                "Extract Progress",
+                "Connection",
                 "Ctrl+2",
+                5,
+            ),
+            (
+                "User Profile",
+                "Ctrl+3",
+                4,
+            ),
+            (
+                "Audit Progress",
+                "Ctrl+4",
                 1,
             ),
             (
                 "Settings",
-                "Ctrl+3",
+                "Ctrl+5",
                 2,
             ),
             (
                 "About",
-                "Ctrl+4",
+                "Ctrl+6",
                 3,
             ),
         ]
@@ -701,10 +754,10 @@ class MainWindow(QMainWindow):
         """Navigate to Settings and start the connection test."""
 
         self._change_page(
-            2
+            5
         )
 
-        self.settings_page.test_connection_button.click()
+        self.connection_page.test_server_button.click()
 
     def _menu_check_updates(self) -> None:
         """Navigate to Settings and check for updates."""
@@ -733,9 +786,11 @@ class MainWindow(QMainWindow):
             (
                 "Navigation\n"
                 "Ctrl+1    Dashboard\n"
-                "Ctrl+2    Extract Progress\n"
-                "Ctrl+3    Settings\n"
-                "Ctrl+4    About\n\n"
+                "Ctrl+2    Connection\n"
+                "Ctrl+3    User Profile\n"
+                "Ctrl+4    Audit Progress\n"
+                "Ctrl+5    Settings\n"
+                "Ctrl+6    About\n\n"
                 "Application\n"
                 "Ctrl+E    Open Extract Progress\n"
                 "Ctrl+O    Open latest output\n"
@@ -830,6 +885,24 @@ class MainWindow(QMainWindow):
                 "Connection Test in Progress",
                 (
                     "Wait for the connection test to finish "
+                    "before resetting the application."
+                ),
+            )
+            return
+
+        if (
+            self.authentication_thread is not None
+            and self.authentication_thread.isRunning()
+        ):
+            self.settings_page.set_reset_busy(
+                False
+            )
+
+            QMessageBox.warning(
+                self,
+                "Authentication in Progress",
+                (
+                    "Wait for the authentication test to finish "
                     "before resetting the application."
                 ),
             )
@@ -1029,29 +1102,395 @@ class MainWindow(QMainWindow):
                 page_index
             )
 
+    def _load_connection_page(
+        self,
+    ) -> None:
+        """Load the active profile and its secure credential state."""
+
+        profile = (
+            self.connection_profile_service
+            .get_active_profile()
+        )
+
+        state: dict[str, Any] = {
+            "status": "authentication_required",
+            "credential_available": False,
+            "expires_at": "",
+        }
+
+        if profile is not None:
+            try:
+                state = (
+                    self.connection_state_service
+                    .get_status(profile)
+                )
+            except Exception as error:
+                state = {
+                    "status": "authentication_required",
+                    "credential_available": False,
+                    "expires_at": "",
+                    "message": str(error),
+                }
+
+        self.connection_page.load_profile(
+            profile,
+            state,
+        )
+
+    def _save_connection_profile_from_page(
+        self,
+        profile_data: dict[str, str],
+    ) -> dict[str, Any]:
+        """Create or update the active connection profile."""
+
+        profile_id = str(
+            profile_data.get(
+                "profile_id",
+                "",
+            )
+        ).strip()
+
+        profile_name = str(
+            profile_data.get(
+                "profile_name",
+                "",
+            )
+        ).strip()
+
+        system_name = str(
+            profile_data.get(
+                "system_name",
+                "A-SEAT",
+            )
+        ).strip() or "A-SEAT"
+
+        configured_url = str(
+            profile_data.get(
+                "configured_url",
+                "",
+            )
+        ).strip()
+
+        username = str(
+            profile_data.get(
+                "username",
+                "",
+            )
+        ).strip()
+
+        if profile_id:
+            saved_profile = (
+                self.connection_profile_service
+                .update_profile(
+                    profile_id,
+                    profile_name=profile_name,
+                    system_name=system_name,
+                    configured_url=(
+                        self.browser_service
+                        .normalise_url(
+                            configured_url
+                        )
+                    ),
+                    username=username,
+                )
+            )
+        else:
+            saved_profile = (
+                self.connection_profile_service
+                .create_profile(
+                    profile_name=profile_name,
+                    system_name=system_name,
+                    configured_url=configured_url,
+                    username=username,
+                    make_active=True,
+                )
+            )
+
+        self.current_settings[
+            "system_name"
+        ] = saved_profile.get(
+            "system_name",
+            "A-SEAT",
+        )
+
+        self.current_settings[
+            "aseat_url"
+        ] = saved_profile.get(
+            "configured_url",
+            "",
+        )
+
+        self.current_settings[
+            "saved_username"
+        ] = saved_profile.get(
+            "username",
+            "",
+        )
+
+        self.current_settings[
+            "remember_username"
+        ] = bool(
+            saved_profile.get(
+                "username",
+                "",
+            )
+        )
+
+        self.settings_service.save_settings(
+            self.current_settings
+        )
+
+        self.connection_page.load_profile(
+            saved_profile,
+            self.connection_state_service.get_status(
+                saved_profile
+            ),
+        )
+
+        self.extraction_page.set_system_name(
+            self._system_name()
+        )
+
+        return saved_profile
+
+    def _test_connection_from_page(
+        self,
+        profile_data: dict[str, str],
+    ) -> None:
+        """Save the profile and test server reachability."""
+
+        saved_profile = (
+            self._save_connection_profile_from_page(
+                profile_data
+            )
+        )
+
+        self.connection_test_target = (
+            "connection"
+        )
+
+        self._test_system_connection(
+            str(
+                saved_profile.get(
+                    "configured_url",
+                    "",
+                )
+            )
+        )
+
+    def _authenticate_connection_profile(
+        self,
+        profile_data: dict[str, str],
+        password: str,
+        remember_for_five_days: bool,
+    ) -> None:
+        """Validate the active profile credentials in the background."""
+
+        if self.authentication_thread is not None:
+            return
+
+        saved_profile = (
+            self._save_connection_profile_from_page(
+                profile_data
+            )
+        )
+
+        self.pending_authentication_profile = dict(
+            saved_profile
+        )
+        self.pending_authentication_password = password
+        self.pending_authentication_remember = bool(
+            remember_for_five_days
+        )
+
+        self.authentication_thread = QThread(
+            self
+        )
+
+        self.authentication_worker = AuthenticationWorker(
+            configured_url=str(
+                saved_profile.get(
+                    "configured_url",
+                    "",
+                )
+            ),
+            username=str(
+                saved_profile.get(
+                    "username",
+                    "",
+                )
+            ),
+            password=password,
+            show_browser=False,
+        )
+
+        self.authentication_worker.moveToThread(
+            self.authentication_thread
+        )
+
+        self.authentication_thread.started.connect(
+            self.authentication_worker.run
+        )
+
+        self.authentication_worker.authentication_completed.connect(
+            self._authentication_completed
+        )
+
+        self.authentication_worker.authentication_failed.connect(
+            self._authentication_failed
+        )
+
+        self.authentication_worker.finished.connect(
+            self.authentication_thread.quit
+        )
+
+        self.authentication_worker.finished.connect(
+            self.authentication_worker.deleteLater
+        )
+
+        self.authentication_thread.finished.connect(
+            self.authentication_thread.deleteLater
+        )
+
+        self.authentication_thread.finished.connect(
+            self._authentication_thread_finished
+        )
+
+        self.authentication_thread.start()
+
+    def _authentication_completed(
+        self,
+        result: dict[str, Any],
+    ) -> None:
+        """Store a credential only after A-SEAT authentication succeeds."""
+
+        profile = dict(
+            self.pending_authentication_profile
+        )
+
+        password = (
+            self.pending_authentication_password
+        )
+
+        remember = (
+            self.pending_authentication_remember
+        )
+
+        try:
+            saved_profile = (
+                self.connection_state_service
+                .save_credential(
+                    profile_id=str(
+                        profile.get(
+                            "profile_id",
+                            "",
+                        )
+                    ),
+                    configured_url=str(
+                        profile.get(
+                            "configured_url",
+                            "",
+                        )
+                    ),
+                    username=str(
+                        profile.get(
+                            "username",
+                            "",
+                        )
+                    ),
+                    password=password,
+                    remember_for_five_days=remember,
+                )
+            )
+
+            expires_at = str(
+                saved_profile.get(
+                    "credential_expires_at",
+                    "",
+                )
+            )
+
+            self.connection_page.show_authentication_success(
+                remembered=remember,
+                expires_at=expires_at,
+            )
+
+        except Exception as error:
+            self.connection_page.show_authentication_failure(
+                str(error)
+            )
+
+        finally:
+            self.pending_authentication_password = ""
+
+    def _authentication_failed(
+        self,
+        message: str,
+    ) -> None:
+        """Display failed A-SEAT authentication."""
+
+        self.pending_authentication_password = ""
+
+        self.connection_page.show_authentication_failure(
+            message
+        )
+
+    def _authentication_thread_finished(
+        self,
+    ) -> None:
+        """Clear authentication-worker references."""
+
+        self.authentication_worker = None
+        self.authentication_thread = None
+        self.pending_authentication_profile = {}
+        self.pending_authentication_password = ""
+        self.pending_authentication_remember = False
+
+    def _disconnect_active_profile(
+        self,
+    ) -> None:
+        """Delete the active profile credential."""
+
+        profile = (
+            self.connection_profile_service
+            .get_active_profile()
+        )
+
+        if profile is None:
+            self.connection_page.show_disconnected()
+            return
+
+        try:
+            self.connection_state_service.disconnect(
+                profile
+            )
+
+            self.connection_page.show_disconnected()
+
+        except Exception as error:
+            QMessageBox.critical(
+                self,
+                "Disconnect Failed",
+                str(error),
+            )
+
+    def _save_user_profile(
+        self,
+        profile: dict[str, Any],
+    ) -> None:
+        """Save the current Windows user's profile."""
+
+        self.current_user_profile = (
+            self.user_profile_service.save_profile(
+                profile
+            )
+        )
+
     def _save_settings(
         self,
         settings: dict[str, Any],
     ) -> None:
-        """Save visible settings and preserve internal values."""
-
-        previous_tested_url = self._normalise_url(
-            str(
-                self.current_settings.get(
-                    "connection_tested_url",
-                    "",
-                )
-            )
-        )
-
-        new_system_url = self._normalise_url(
-            str(
-                settings.get(
-                    "aseat_url",
-                    "",
-                )
-            )
-        )
+        """Save application preferences and preserve connection data."""
 
         updated_settings = dict(
             self.current_settings
@@ -1061,58 +1500,11 @@ class MainWindow(QMainWindow):
             settings
         )
 
-        if (
-            previous_tested_url
-            and new_system_url != previous_tested_url
-        ):
-            updated_settings[
-                "connection_test_status"
-            ] = ""
-
-            updated_settings[
-                "connection_tested_url"
-            ] = ""
-
-            updated_settings[
-                "connection_tested_at"
-            ] = ""
-
-            updated_settings[
-                "connection_test_message"
-            ] = ""
-
         self.current_settings = (
             updated_settings
         )
 
-        self.extraction_page.set_system_name(
-            self._system_name()
-        )
-
-        self.about_page.refresh_branding(
-            use_custom_logo=bool(
-                self.current_settings.get(
-                    "use_custom_logo",
-                    False,
-                )
-            ),
-            organisation_name=self._system_name(),
-        )
-
-        self.sidebar.refresh_branding(
-            use_custom_logo=bool(
-                self.current_settings.get(
-                    "use_custom_logo",
-                    False,
-                )
-            )
-        )
-
         self.settings_service.save_settings(
-            self.current_settings
-        )
-
-        self.settings_page.restore_connection_status(
             self.current_settings
         )
 
@@ -1302,12 +1694,28 @@ class MainWindow(QMainWindow):
 
         system_name = self._system_name()
 
-        system_url = str(
-            self.current_settings.get(
-                "aseat_url",
-                "",
-            )
-        ).strip()
+        active_profile = (
+            self.connection_profile_service
+            .get_active_profile()
+        )
+
+        system_url = ""
+
+        if active_profile is not None:
+            system_url = str(
+                active_profile.get(
+                    "configured_url",
+                    "",
+                )
+            ).strip()
+
+        if not system_url:
+            system_url = str(
+                self.current_settings.get(
+                    "aseat_url",
+                    "",
+                )
+            ).strip()
 
         if not system_url:
             QMessageBox.warning(
@@ -1347,9 +1755,7 @@ class MainWindow(QMainWindow):
         self,
         request: dict[str, Any],
     ) -> None:
-        """Validate and start an extraction."""
-
-        system_name = self._system_name()
+        """Validate and start an extraction using the active profile."""
 
         if self.extraction_thread is not None:
             QMessageBox.information(
@@ -1362,12 +1768,66 @@ class MainWindow(QMainWindow):
             )
             return
 
-        system_url = str(
-            self.current_settings.get(
-                "aseat_url",
-                "",
-            )
-        ).strip()
+        active_profile = (
+            self.connection_profile_service
+            .get_active_profile()
+        )
+
+        system_name = self._system_name()
+        system_url = ""
+        username = ""
+        password = ""
+
+        if active_profile is not None:
+            system_name = str(
+                active_profile.get(
+                    "system_name",
+                    system_name,
+                )
+            ).strip() or system_name
+
+            system_url = str(
+                active_profile.get(
+                    "configured_url",
+                    "",
+                )
+            ).strip()
+
+            username = str(
+                active_profile.get(
+                    "username",
+                    "",
+                )
+            ).strip()
+
+            try:
+                password = (
+                    self.connection_state_service
+                    .retrieve_password(
+                        active_profile
+                    )
+                    or ""
+                )
+            except Exception as error:
+                QMessageBox.warning(
+                    self,
+                    "Stored Credential Unavailable",
+                    (
+                        "The saved A-SEAT credential could not be "
+                        "retrieved. Enter the password manually or "
+                        "reconnect from the Connection page.\n\n"
+                        f"{error}"
+                    ),
+                )
+                password = ""
+
+        if not system_url:
+            system_url = str(
+                self.current_settings.get(
+                    "aseat_url",
+                    "",
+                )
+            ).strip()
 
         output_folder = str(
             self.current_settings.get(
@@ -1381,12 +1841,12 @@ class MainWindow(QMainWindow):
                 self,
                 f"{system_name} Address Not Configured",
                 (
-                    f"Enter the {system_name} address "
-                    "under Settings."
+                    "Open Connection and configure the "
+                    f"{system_name} address before continuing."
                 ),
             )
 
-            self._change_page(2)
+            self._change_page(5)
             return
 
         if not output_folder:
@@ -1402,48 +1862,52 @@ class MainWindow(QMainWindow):
             self._change_page(2)
             return
 
-        remembered_username = str(
-            self.current_settings.get(
-                "saved_username",
-                "",
+        if not username or not password:
+            remembered_username = (
+                username
+                or str(
+                    self.current_settings.get(
+                        "saved_username",
+                        "",
+                    )
+                )
             )
-        )
 
-        remember_username = bool(
-            self.current_settings.get(
-                "remember_username",
-                False,
+            remember_username = bool(
+                self.current_settings.get(
+                    "remember_username",
+                    False,
+                )
             )
-        )
 
-        login_dialog = LoginDialog(
-            system_name=system_name,
-            saved_username=remembered_username,
-            remember_username=remember_username,
-            parent=self,
-        )
+            login_dialog = LoginDialog(
+                system_name=system_name,
+                saved_username=remembered_username,
+                remember_username=remember_username,
+                parent=self,
+            )
 
-        if (
-            login_dialog.exec()
-            != QDialog.DialogCode.Accepted
-        ):
+            if (
+                login_dialog.exec()
+                != QDialog.DialogCode.Accepted
+            ):
+                login_dialog.clear_password()
+                login_dialog.deleteLater()
+                return
+
+            (
+                username,
+                password,
+                remember_username,
+            ) = login_dialog.credentials()
+
+            self._save_username_preference(
+                username=username,
+                remember_username=remember_username,
+            )
+
             login_dialog.clear_password()
             login_dialog.deleteLater()
-            return
-
-        (
-            username,
-            password,
-            remember_username,
-        ) = login_dialog.credentials()
-
-        self._save_username_preference(
-            username=username,
-            remember_username=remember_username,
-        )
-
-        login_dialog.clear_password()
-        login_dialog.deleteLater()
 
         self.dashboard_page.set_extraction_started()
 
@@ -1475,6 +1939,8 @@ class MainWindow(QMainWindow):
                 )
             ),
         )
+
+        password = ""
 
         self.extraction_worker.moveToThread(
             self.extraction_thread
@@ -1668,12 +2134,20 @@ class MainWindow(QMainWindow):
         if self.connection_thread is not None:
             return
 
-        system_name = (
-            self.settings_page.system_name_input
-            .text()
-            .strip()
-            or "A-SEAT"
+        active_profile = (
+            self.connection_profile_service
+            .get_active_profile()
         )
+
+        system_name = self._system_name()
+
+        if active_profile is not None:
+            system_name = str(
+                active_profile.get(
+                    "system_name",
+                    system_name,
+                )
+            ).strip() or system_name
 
         self.connection_test_url = (
             system_url.strip()
@@ -1748,11 +2222,21 @@ class MainWindow(QMainWindow):
                 tested_at=tested_at,
             )
 
-            self.settings_page.show_connection_success(
-                result=result,
-                tested_at=tested_at,
-                tested_url=self.connection_test_url,
-            )
+            if self.connection_test_target == "connection":
+                self.connection_page.show_server_success(
+                    str(
+                        result.get(
+                            "message",
+                            "A-SEAT login page detected.",
+                        )
+                    )
+                )
+            else:
+                self.settings_page.show_connection_success(
+                    result=result,
+                    tested_at=tested_at,
+                    tested_url=self.connection_test_url,
+                )
         else:
             message = str(
                 result.get(
@@ -1772,11 +2256,16 @@ class MainWindow(QMainWindow):
                 message=message,
             )
 
-            self.settings_page.show_connection_warning(
-                result=result,
-                tested_at=tested_at,
-                tested_url=self.connection_test_url,
-            )
+            if self.connection_test_target == "connection":
+                self.connection_page.show_server_failure(
+                    message
+                )
+            else:
+                self.settings_page.show_connection_warning(
+                    result=result,
+                    tested_at=tested_at,
+                    tested_url=self.connection_test_url,
+                )
 
     def _connection_test_failed(
         self,
@@ -1795,11 +2284,16 @@ class MainWindow(QMainWindow):
             message=message,
         )
 
-        self.settings_page.show_connection_failure(
-            message=message,
-            tested_at=tested_at,
-            tested_url=self.connection_test_url,
-        )
+        if self.connection_test_target == "connection":
+            self.connection_page.show_server_failure(
+                message
+            )
+        else:
+            self.settings_page.show_connection_failure(
+                message=message,
+                tested_at=tested_at,
+                tested_url=self.connection_test_url,
+            )
 
     def _connection_thread_finished(
         self,
@@ -1812,6 +2306,7 @@ class MainWindow(QMainWindow):
         self.connection_test_system_name = (
             "A-SEAT"
         )
+        self.connection_test_target = "settings"
 
     def _check_for_updates(self) -> None:
         """Start a GitHub update check."""
@@ -2278,6 +2773,22 @@ class MainWindow(QMainWindow):
                 "Connection Test in Progress",
                 (
                     "Wait for the connection test "
+                    "to finish before closing the application."
+                ),
+            )
+
+            event.ignore()
+            return
+
+        if (
+            self.authentication_thread is not None
+            and self.authentication_thread.isRunning()
+        ):
+            QMessageBox.warning(
+                self,
+                "Authentication in Progress",
+                (
+                    "Wait for the authentication test "
                     "to finish before closing the application."
                 ),
             )

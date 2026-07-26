@@ -31,7 +31,7 @@ class Sidebar(QWidget):
         self.branding_service = branding_service
         self.use_custom_logo = use_custom_logo
 
-        self._buttons: list[QPushButton] = []
+        self._buttons_by_page: dict[int, QPushButton] = {}
 
         self.setObjectName("sidebar")
         self.setFixedWidth(300)
@@ -75,7 +75,7 @@ class Sidebar(QWidget):
         )
 
         subtitle = QLabel(
-            "Audit Progress\nExtractor"
+            "Utility"
         )
         subtitle.setObjectName(
             "sidebarSubtitle"
@@ -100,7 +100,9 @@ class Sidebar(QWidget):
 
         navigation_items = [
             ("Dashboard", 0),
-            ("Extract Progress", 1),
+            ("Connection", 5),
+            ("User Profile", 4),
+            ("Audit Progress", 1),
             ("Settings", 2),
             ("About", 3),
         ]
@@ -122,14 +124,16 @@ class Sidebar(QWidget):
             self.button_group.addButton(
                 button
             )
-            self._buttons.append(
-                button
-            )
+
+            self._buttons_by_page[
+                page_index
+            ] = button
+
             layout.addWidget(button)
 
-        self._buttons[0].setChecked(
-            True
-        )
+        self._buttons_by_page[
+            0
+        ].setChecked(True)
 
         layout.addStretch()
 
@@ -274,13 +278,9 @@ class Sidebar(QWidget):
         self,
         page_index: int,
     ) -> None:
-        if (
-            0
-            <= page_index
-            < len(self._buttons)
-        ):
-            self._buttons[
-                page_index
-            ].setChecked(
-                True
-            )
+        button = self._buttons_by_page.get(
+            page_index
+        )
+
+        if button is not None:
+            button.setChecked(True)
