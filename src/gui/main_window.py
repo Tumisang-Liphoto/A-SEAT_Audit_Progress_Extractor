@@ -35,6 +35,7 @@ from src.services.browser_service import BrowserService
 from src.services.comparison_service import ComparisonService
 from src.services.connection_profile_service import ConnectionProfileService
 from src.services.connection_state_service import ConnectionStateService
+from src.services.export_service import ExportService
 from src.services.generated_file_service import GeneratedFileService
 from src.services.reset_service import ResetService
 from src.services.settings_service import SettingsService
@@ -55,6 +56,7 @@ class MainWindow(QMainWindow):
         self.browser_service = BrowserService()
         self.comparison_service = ComparisonService()
         self.generated_file_service = GeneratedFileService()
+        self.export_service = ExportService()
         self.reset_service = ResetService()
         self.user_profile_service = UserProfileService()
         self.connection_profile_service = ConnectionProfileService()
@@ -2051,6 +2053,18 @@ class MainWindow(QMainWindow):
             self.dashboard_page.show_comparison(
                 comparison
             )
+
+            excel_outputs = [
+                Path(path)
+                for path in output_paths
+                if Path(path).suffix.lower() == ".xlsx"
+            ]
+
+            for excel_output in excel_outputs:
+                self.export_service.add_analysis_sheets(
+                    workbook_path=excel_output,
+                    comparison=comparison,
+                )
 
         except Exception as error:
             comparison_error = str(error)
