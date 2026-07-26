@@ -1104,6 +1104,77 @@ class MainWindow(QMainWindow):
                 page_index
             )
 
+    def _saved_server_test_state(
+        self,
+        profile: dict[str, Any] | None,
+    ) -> dict[str, str]:
+        """Return the saved server-test result for the active URL."""
+
+        status = str(
+            self.current_settings.get(
+                "connection_test_status",
+                "",
+            )
+        ).strip()
+
+        tested_url = str(
+            self.current_settings.get(
+                "connection_tested_url",
+                "",
+            )
+        ).strip()
+
+        tested_at = str(
+            self.current_settings.get(
+                "connection_tested_at",
+                "",
+            )
+        ).strip()
+
+        message = str(
+            self.current_settings.get(
+                "connection_test_message",
+                "",
+            )
+        ).strip()
+
+        configured_url = ""
+
+        if profile is not None:
+            configured_url = str(
+                profile.get(
+                    "configured_url",
+                    "",
+                )
+            ).strip()
+
+        if (
+            not status
+            or not tested_url
+            or (
+                configured_url
+                and self._normalise_url(
+                    configured_url
+                )
+                != self._normalise_url(
+                    tested_url
+                )
+            )
+        ):
+            return {
+                "status": "not_tested",
+                "tested_url": "",
+                "tested_at": "",
+                "message": "",
+            }
+
+        return {
+            "status": status,
+            "tested_url": tested_url,
+            "tested_at": tested_at,
+            "message": message,
+        }
+
     def _load_connection_page(
         self,
     ) -> None:
@@ -1137,6 +1208,9 @@ class MainWindow(QMainWindow):
         self.connection_page.load_profile(
             profile,
             state,
+            self._saved_server_test_state(
+                profile
+            ),
         )
 
     def _save_connection_profile_from_page(
@@ -1245,6 +1319,9 @@ class MainWindow(QMainWindow):
         self.connection_page.load_profile(
             saved_profile,
             self.connection_state_service.get_status(
+                saved_profile
+            ),
+            self._saved_server_test_state(
                 saved_profile
             ),
         )
@@ -2230,20 +2307,25 @@ class MainWindow(QMainWindow):
                 False,
             )
         ):
+            success_message = str(
+                result.get(
+                    "message",
+                    "A-SEAT login page detected.",
+                )
+            )
+
             self._save_connection_result(
                 status="successful",
                 tested_url=self.connection_test_url,
                 tested_at=tested_at,
+                message=success_message,
             )
 
             if self.connection_test_target == "connection":
                 self.connection_page.show_server_success(
-                    str(
-                        result.get(
-                            "message",
-                            "A-SEAT login page detected.",
-                        )
-                    )
+                    success_message,
+                    tested_at=tested_at,
+                    tested_url=self.connection_test_url,
                 )
             else:
                 self.settings_page.show_connection_success(
@@ -2272,7 +2354,9 @@ class MainWindow(QMainWindow):
 
             if self.connection_test_target == "connection":
                 self.connection_page.show_server_failure(
-                    message
+                    message,
+                    tested_at=tested_at,
+                    tested_url=self.connection_test_url,
                 )
             else:
                 self.settings_page.show_connection_warning(
@@ -2300,7 +2384,9 @@ class MainWindow(QMainWindow):
 
         if self.connection_test_target == "connection":
             self.connection_page.show_server_failure(
-                message
+                message,
+                tested_at=tested_at,
+                tested_url=self.connection_test_url,
             )
         else:
             self.settings_page.show_connection_failure(

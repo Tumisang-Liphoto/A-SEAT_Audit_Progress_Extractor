@@ -398,11 +398,13 @@ class ConnectionPage(QWidget):
         self,
         profile: dict[str, Any] | None,
         state: dict[str, Any] | None = None,
+        server_state: dict[str, Any] | None = None,
     ) -> None:
-        """Display the active profile and credential state."""
+        """Display the active profile and saved connection states."""
 
         profile = profile or {}
         state = state or {}
+        server_state = server_state or {}
 
         self._active_profile_id = str(
             profile.get(
@@ -449,6 +451,10 @@ class ConnectionPage(QWidget):
 
         self.show_authentication_state(
             state
+        )
+
+        self.show_server_state(
+            server_state
         )
 
     def _validate_profile(
@@ -586,13 +592,37 @@ class ConnectionPage(QWidget):
     def show_server_success(
         self,
         message: str,
+        *,
+        tested_at: str = "",
+        tested_url: str = "",
     ) -> None:
         self.set_server_test_busy(
             False
         )
 
+        lines = [
+            "Server status: Reachable",
+        ]
+
+        if message:
+            lines.append(
+                message
+            )
+
+        if tested_at:
+            lines.append(
+                f"Tested: {tested_at}"
+            )
+
+        if tested_url:
+            lines.append(
+                f"Address: {tested_url}"
+            )
+
         self.server_status_label.setText(
-            f"Server status: Reachable\n{message}"
+            "\n".join(
+                lines
+            )
         )
 
         self.server_status_label.setStyleSheet(
@@ -602,17 +632,101 @@ class ConnectionPage(QWidget):
     def show_server_failure(
         self,
         message: str,
+        *,
+        tested_at: str = "",
+        tested_url: str = "",
     ) -> None:
         self.set_server_test_busy(
             False
         )
 
+        lines = [
+            "Server status: Failed",
+        ]
+
+        if message:
+            lines.append(
+                message
+            )
+
+        if tested_at:
+            lines.append(
+                f"Tested: {tested_at}"
+            )
+
+        if tested_url:
+            lines.append(
+                f"Address: {tested_url}"
+            )
+
         self.server_status_label.setText(
-            f"Server status: Failed\n{message}"
+            "\n".join(
+                lines
+            )
         )
 
         self.server_status_label.setStyleSheet(
             "color: #dc2626; font-weight: 700;"
+        )
+
+    def show_server_state(
+        self,
+        state: dict[str, Any],
+    ) -> None:
+        """Restore the most recent saved server-test result."""
+
+        status = str(
+            state.get(
+                "status",
+                "not_tested",
+            )
+        ).strip().lower()
+
+        tested_at = str(
+            state.get(
+                "tested_at",
+                "",
+            )
+        ).strip()
+
+        tested_url = str(
+            state.get(
+                "tested_url",
+                "",
+            )
+        ).strip()
+
+        message = str(
+            state.get(
+                "message",
+                "",
+            )
+        ).strip()
+
+        if status == "successful":
+            self.show_server_success(
+                message or "A-SEAT login page detected.",
+                tested_at=tested_at,
+                tested_url=tested_url,
+            )
+            return
+
+        if status == "failed":
+            self.show_server_failure(
+                message or "The previous server test failed.",
+                tested_at=tested_at,
+                tested_url=tested_url,
+            )
+            return
+
+        self.set_server_test_busy(
+            False
+        )
+        self.server_status_label.setText(
+            "Server status: Not tested"
+        )
+        self.server_status_label.setStyleSheet(
+            ""
         )
 
     def set_authentication_busy(
