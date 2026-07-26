@@ -1,9 +1,11 @@
+import logging
 import sys
 
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
 
 from src.gui.main_window import MainWindow
+from src.services.logging_service import LoggingService
 from src.services.settings_service import SettingsService
 from src.services.theme_service import apply_theme
 from src.utils.version import APP_NAME, APP_VERSION
@@ -13,6 +15,8 @@ class AuditProgressExtractorApplication:
     """Controls application startup and shutdown."""
 
     def __init__(self) -> None:
+        self.log_path = LoggingService.configure()
+        self.logger = logging.getLogger(__name__)
         self.qt_application = QApplication(sys.argv)
 
         self.qt_application.setApplicationName(APP_NAME)

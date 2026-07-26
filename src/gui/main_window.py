@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -41,7 +42,7 @@ from src.services.reset_service import ResetService
 from src.services.settings_service import SettingsService
 from src.services.theme_service import apply_theme
 from src.services.user_profile_service import UserProfileService
-from src.utils.app_paths import application_folder, config_folder
+from src.utils.app_paths import application_folder, config_folder, logs_folder
 from src.utils.version import APP_NAME, APP_VERSION
 
 
@@ -51,6 +52,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
 
+        self.logger = logging.getLogger(__name__)
         self.settings_service = SettingsService()
         self.branding_service = BrandingService()
         self.browser_service = BrowserService()
@@ -115,6 +117,7 @@ class MainWindow(QMainWindow):
         self._refresh_branding_views()
 
         self._restore_dashboard_state()
+
 
     def _system_name(self) -> str:
         """Return the configured local system name."""
@@ -521,6 +524,20 @@ class MainWindow(QMainWindow):
             open_data_folder_action
         )
 
+        open_log_folder_action = QAction(
+            "Open Log Folder",
+            self,
+        )
+        open_log_folder_action.setStatusTip(
+            "Open the folder containing diagnostic log files."
+        )
+        open_log_folder_action.triggered.connect(
+            self._open_log_folder
+        )
+        tools_menu.addAction(
+            open_log_folder_action
+        )
+
         tools_menu.addSeparator()
 
         reset_action = QAction(
@@ -751,6 +768,50 @@ class MainWindow(QMainWindow):
                 "Unable to Open Folder",
                 "The application data folder could not be opened.",
             )
+
+    def _open_log_folder(self) -> None:
+        """Open the diagnostic log folder."""
+
+        folder = logs_folder()
+
+        try:
+            folder.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+        except OSError as error:
+            self.logger.exception(
+                "The log folder could not be created."
+            )
+            QMessageBox.critical(
+                self,
+                "Log Folder",
+                (
+                    "The diagnostic log folder could not be created."
+                    f"\n\n{error}"
+                ),
+            )
+            return
+
+        opened = QDesktopServices.openUrl(
+            QUrl.fromLocalFile(
+                str(folder.resolve())
+            )
+        )
+
+        if opened:
+            self.logger.info("Log folder opened.")
+            return
+
+        self.logger.error(
+            "The log folder could not be opened: %s",
+            folder,
+        )
+        QMessageBox.critical(
+            self,
+            "Unable to Open Log Folder",
+            "The diagnostic log folder could not be opened.",
+        )
 
     def _menu_test_connection(self) -> None:
         """Navigate to Settings and start the connection test."""
@@ -1724,6 +1785,7 @@ class MainWindow(QMainWindow):
         current_version: str,
         latest_version: str = "",
         release_name: str = "",
+        release_notes: str = "",
         message: str = "",
     ) -> None:
         """Save the latest GitHub update-check result."""
@@ -1747,6 +1809,10 @@ class MainWindow(QMainWindow):
         self.current_settings[
             "last_update_check_release_name"
         ] = release_name
+
+        self.current_settings[
+            "last_update_check_release_notes"
+        ] = release_notes
 
         self.current_settings[
             "last_update_check_message"
@@ -1988,6 +2054,13 @@ class MainWindow(QMainWindow):
             login_dialog.clear_password()
             login_dialog.deleteLater()
 
+        self.logger.info(
+            "Extraction starting | system=%s | format=%s | audit_year=%s",
+            system_name,
+            request.get("output_format", ""),
+            request.get("audit_year", ""),
+        )
+
         self.dashboard_page.set_extraction_started()
 
         self.extraction_page.reset_progress()
@@ -2178,6 +2251,18 @@ class MainWindow(QMainWindow):
                 + "\n- ".join(processing_errors)
             )
 
+        self.logger.info(
+            "Extraction completed | records=%s | outputs=%s",
+            record_count,
+            [Path(path).name for path in output_paths],
+        )
+
+        if processing_errors:
+            self.logger.warning(
+                "Supporting tasks reported errors: %s",
+                processing_errors,
+            )
+
         QMessageBox.information(
             self,
             "Extraction Completed",
@@ -2189,6 +2274,11 @@ class MainWindow(QMainWindow):
         message: str,
     ) -> None:
         """Handle a failed extraction."""
+
+        self.logger.error(
+            "Extraction failed: %s",
+            message,
+        )
 
         self.extraction_page.show_failed(
             message
@@ -2414,6 +2504,8 @@ class MainWindow(QMainWindow):
         if self.update_thread is not None:
             return
 
+        self.logger.info("Update check starting.")
+
         self.update_thread = QThread(
             self
         )
@@ -2487,6 +2579,13 @@ class MainWindow(QMainWindow):
             )
         )
 
+        release_notes = str(
+            result.get(
+                "release_notes",
+                "",
+            )
+        )
+
         if bool(
             result.get(
                 "update_available",
@@ -2503,12 +2602,14 @@ class MainWindow(QMainWindow):
                 current_version=current_version,
                 latest_version=latest_version,
                 release_name=release_name,
+                release_notes=release_notes,
             )
 
             self.settings_page.show_update_available(
                 current_version=current_version,
                 latest_version=latest_version,
                 release_name=release_name,
+                release_notes=release_notes,
                 checked_at=checked_at,
             )
         else:
@@ -2520,6 +2621,7 @@ class MainWindow(QMainWindow):
                 current_version=current_version,
                 latest_version=latest_version,
                 release_name=release_name,
+                release_notes=release_notes,
             )
 
             self.settings_page.show_no_update(
@@ -2700,6 +2802,11 @@ class MainWindow(QMainWindow):
 
         self.install_update_after_thread = False
         self.prepared_update_information = {}
+
+        self.logger.error(
+            "Update preparation failed: %s",
+            message,
+        )
 
         self.settings_page.show_update_install_failure(
             message

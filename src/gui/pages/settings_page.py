@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QProgressBar,
     QScrollArea,
+    QTextBrowser,
     QVBoxLayout,
     QWidget,
 )
@@ -255,6 +256,30 @@ class SettingsPage(QWidget):
             True
         )
 
+        self.release_notes_heading = QLabel(
+            "What's New"
+        )
+        self.release_notes_heading.setObjectName(
+            "sectionHeading"
+        )
+        self.release_notes_heading.setVisible(
+            False
+        )
+
+        self.release_notes_browser = QTextBrowser()
+        self.release_notes_browser.setOpenExternalLinks(
+            True
+        )
+        self.release_notes_browser.setMinimumHeight(
+            150
+        )
+        self.release_notes_browser.setMaximumHeight(
+            260
+        )
+        self.release_notes_browser.setVisible(
+            False
+        )
+
         update_layout.addWidget(
             self.check_updates_button
         )
@@ -266,6 +291,12 @@ class SettingsPage(QWidget):
         )
         update_layout.addWidget(
             self.update_status_label
+        )
+        update_layout.addWidget(
+            self.release_notes_heading
+        )
+        update_layout.addWidget(
+            self.release_notes_browser
         )
 
         form.addRow(
@@ -672,6 +703,13 @@ class SettingsPage(QWidget):
             )
         ).strip()
 
+        release_notes = str(
+            settings.get(
+                "last_update_check_release_notes",
+                "",
+            )
+        ).strip()
+
         if not status:
             self.update_status_label.setText(
                 (
@@ -703,6 +741,7 @@ class SettingsPage(QWidget):
                 current_version=APP_VERSION,
                 latest_version=latest_version or "Unknown",
                 release_name=release_name,
+                release_notes=release_notes,
                 checked_at=checked_at,
                 allow_install=False,
             )
@@ -784,6 +823,7 @@ class SettingsPage(QWidget):
         self.update_progress_bar.setVisible(
             False
         )
+        self._set_release_notes("")
 
         last_checked = checked_at or "Unknown"
 
@@ -810,6 +850,7 @@ class SettingsPage(QWidget):
         current_version: str,
         latest_version: str,
         release_name: str,
+        release_notes: str = "",
         checked_at: str = "",
         allow_install: bool = True,
     ) -> None:
@@ -846,6 +887,10 @@ class SettingsPage(QWidget):
             status_text
         )
 
+        self._set_release_notes(
+            release_notes
+        )
+
         self.update_status_label.setStyleSheet(
             """
             QLabel {
@@ -855,6 +900,28 @@ class SettingsPage(QWidget):
             }
             """
         )
+
+    def _set_release_notes(
+        self,
+        release_notes: str,
+    ) -> None:
+        """Display or hide GitHub release notes."""
+
+        cleaned_notes = release_notes.strip()
+
+        self.release_notes_heading.setVisible(
+            bool(cleaned_notes)
+        )
+        self.release_notes_browser.setVisible(
+            bool(cleaned_notes)
+        )
+
+        if cleaned_notes:
+            self.release_notes_browser.setMarkdown(
+                cleaned_notes
+            )
+        else:
+            self.release_notes_browser.clear()
 
     def show_update_failure(
         self,
@@ -874,6 +941,7 @@ class SettingsPage(QWidget):
         self.update_progress_bar.setVisible(
             False
         )
+        self._set_release_notes("")
 
         last_checked = checked_at or "Unknown"
 
@@ -922,6 +990,7 @@ class SettingsPage(QWidget):
             self.update_progress_bar.setValue(
                 0
             )
+            self._set_release_notes("")
 
     def show_update_download_progress(
         self,
