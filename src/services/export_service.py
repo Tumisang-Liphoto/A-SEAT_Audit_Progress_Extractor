@@ -864,6 +864,9 @@ class ExportService:
             "Delivery Status",
             "Days to Completion",
             "Issue",
+            "Match Method",
+            "Match Score (%)",
+            "Identity Change",
         ]
 
         worksheet.sheet_view.showGridLines = False
@@ -994,6 +997,18 @@ class ExportService:
                     "delivery_issue",
                     "",
                 ),
+                row.get(
+                    "match_method_label",
+                    "",
+                ),
+                row.get(
+                    "match_score",
+                    None,
+                ),
+                row.get(
+                    "identity_change_text",
+                    "",
+                ),
             ]
 
             for column_number, value in enumerate(
@@ -1063,8 +1078,46 @@ class ExportService:
                     fgColor="E4DFEC",
                 )
 
+            match_method = str(
+                row.get(
+                    "match_method",
+                    "",
+                )
+            )
+
+            if match_method == "fuzzy":
+                worksheet.cell(
+                    row=row_number,
+                    column=16,
+                ).fill = PatternFill(
+                    "solid",
+                    fgColor="FFF2CC",
+                )
+            elif match_method == "strong_identity":
+                worksheet.cell(
+                    row=row_number,
+                    column=16,
+                ).fill = PatternFill(
+                    "solid",
+                    fgColor="D9EAF7",
+                )
+
+            if bool(
+                row.get(
+                    "identity_changed",
+                    False,
+                )
+            ):
+                worksheet.cell(
+                    row=row_number,
+                    column=18,
+                ).fill = PatternFill(
+                    "solid",
+                    fgColor="FCE4D6",
+                )
+
         worksheet.auto_filter.ref = (
-            f"A1:O{max(1, len(rows) + 1)}"
+            f"A1:R{max(1, len(rows) + 1)}"
         )
 
         widths = {
@@ -1083,6 +1136,9 @@ class ExportService:
             "M": 23,
             "N": 18,
             "O": 48,
+            "P": 27,
+            "Q": 17,
+            "R": 55,
         }
 
         for column_letter, width in widths.items():

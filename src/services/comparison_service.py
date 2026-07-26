@@ -1,5 +1,7 @@
 import json
 import re
+import unicodedata
+from difflib import SequenceMatcher
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -21,6 +23,21 @@ class ComparisonService:
         "Audit Type",
         "Audit Year",
     )
+
+    EXACT_IDENTITY_FIELDS = (
+        "Auditee Name",
+        "Audit Name",
+        "Audit Type",
+        "Audit Year",
+    )
+
+    FUZZY_SCOPE_FIELDS = (
+        "Audit Type",
+        "Audit Year",
+    )
+
+    FUZZY_MATCH_THRESHOLD = 0.88
+    FUZZY_MATCH_MARGIN = 0.08
 
     DISPLAY_FIELDS = (
         "Auditee Name",
@@ -171,25 +188,29 @@ class ComparisonService:
         previous_snapshot: dict[str, Any],
         current_snapshot: dict[str, Any],
     ) -> dict[str, Any]:
-        """Compare two loaded snapshots."""
+        """Compare two loaded snapshots using staged record matching."""
 
-        previous_records = self._records_by_key(
+        previous_records = self._clean_record_list(
             previous_snapshot.get(
                 "records",
                 [],
             )
         )
 
-        current_records = self._records_by_key(
+        current_records = self._clean_record_list(
             current_snapshot.get(
                 "records",
                 [],
             )
         )
 
-        all_keys = sorted(
-            set(previous_records)
-            | set(current_records)
+        (
+            matched_records,
+            unmatched_previous,
+            unmatched_current,
+        ) = self._match_records(
+            previous_records=previous_records,
+            current_records=current_records,
         )
 
         comparison_rows: list[dict[str, Any]] = []
@@ -219,6 +240,18 @@ class ComparisonService:
             "not_currently_listed": 0,
         }
 
+        matching_totals = {
+            "exact": 0,
+            "strong_identity": 0,
+            "fuzzy": 0,
+            "new": len(
+                unmatched_current
+            ),
+            "missing": len(
+                unmatched_previous
+            ),
+        }
+
         movement_values: list[float] = []
 
         assessment_date = self._snapshot_date(
@@ -230,63 +263,94 @@ class ComparisonService:
             )
         )
 
-        for audit_key in all_keys:
-            previous_record = previous_records.get(
-                audit_key
+        for (
+            previous_record,
+            current_record,
+            match_information,
+        ) in matched_records:
+            row = self._matched_audit_row(
+                previous_record=previous_record,
+                current_record=current_record,
+                assessment_date=assessment_date,
             )
 
-            current_record = current_records.get(
-                audit_key
+            row.update(
+                match_information
             )
 
-            if (
-                previous_record is None
-                and current_record is not None
+            totals["audits_compared"] += 1
+            totals[row["status"]] += 1
+
+            match_method = str(
+                match_information.get(
+                    "match_method",
+                    "",
+                )
+            )
+
+            if match_method in matching_totals:
+                matching_totals[
+                    match_method
+                ] += 1
+
+            movement = row.get(
+                "movement_value"
+            )
+
+            if isinstance(
+                movement,
+                (int, float),
             ):
-                row = self._new_audit_row(
-                    current_record,
-                    assessment_date=assessment_date,
+                movement_values.append(
+                    float(movement)
                 )
 
-                totals["new"] += 1
+            comparison_rows.append(
+                row
+            )
 
-            elif (
-                previous_record is not None
-                and current_record is None
-            ):
-                row = self._missing_audit_row(
-                    previous_record
-                )
+        for current_record in unmatched_current:
+            row = self._new_audit_row(
+                current_record,
+                assessment_date=assessment_date,
+            )
 
-                totals["missing"] += 1
+            row.update(
+                {
+                    "match_method": "new",
+                    "match_method_label": "New audit",
+                    "match_score": None,
+                    "identity_changed": False,
+                    "identity_change_text": "",
+                }
+            )
 
-            elif (
-                previous_record is not None
-                and current_record is not None
-            ):
-                row = self._matched_audit_row(
-                    previous_record=previous_record,
-                    current_record=current_record,
-                    assessment_date=assessment_date,
-                )
+            totals["new"] += 1
+            comparison_rows.append(
+                row
+            )
 
-                totals["audits_compared"] += 1
-                totals[row["status"]] += 1
+        for previous_record in unmatched_previous:
+            row = self._missing_audit_row(
+                previous_record
+            )
 
-                movement = row.get(
-                    "movement_value"
-                )
+            row.update(
+                {
+                    "match_method": "missing",
+                    "match_method_label": "No match found",
+                    "match_score": None,
+                    "identity_changed": False,
+                    "identity_change_text": "",
+                }
+            )
 
-                if isinstance(
-                    movement,
-                    (int, float),
-                ):
-                    movement_values.append(
-                        float(movement)
-                    )
-            else:
-                continue
+            totals["missing"] += 1
+            comparison_rows.append(
+                row
+            )
 
+        for row in comparison_rows:
             delivery_status = str(
                 row.get(
                     "delivery_status",
@@ -298,10 +362,6 @@ class ComparisonService:
                 delivery_totals[
                     delivery_status
                 ] += 1
-
-            comparison_rows.append(
-                row
-            )
 
         comparison_rows.sort(
             key=lambda row: (
@@ -377,15 +437,15 @@ class ComparisonService:
                     current_extracted_at
                 )
             ),
+            "assessment_date": assessment_date.isoformat(),
+            "assessment_display_date": assessment_date.strftime(
+                "%d %B %Y"
+            ),
             "previous_record_count": int(
                 previous_snapshot.get(
                     "record_count",
                     len(previous_records),
                 )
-            ),
-            "assessment_date": assessment_date.isoformat(),
-            "assessment_display_date": assessment_date.strftime(
-                "%d %B %Y"
             ),
             "current_record_count": int(
                 current_snapshot.get(
@@ -399,6 +459,7 @@ class ComparisonService:
             ),
             "summary": totals,
             "delivery_summary": delivery_totals,
+            "matching_summary": matching_totals,
             "rows": comparison_rows,
         }
 
@@ -425,6 +486,13 @@ class ComparisonService:
                 "new": 0,
                 "missing": 0,
                 "not_comparable": 0,
+            },
+            "matching_summary": {
+                "exact": 0,
+                "strong_identity": 0,
+                "fuzzy": 0,
+                "new": 0,
+                "missing": 0,
             },
             "delivery_summary": {
                 "completed": 0,
@@ -1027,70 +1095,521 @@ class ComparisonService:
         except ValueError:
             return date.today()
 
-    def _records_by_key(
+    def _clean_record_list(
         self,
         records: Any,
-    ) -> dict[tuple[str, ...], dict[str, Any]]:
-        """Index records using the stable comparison fields."""
+    ) -> list[dict[str, str]]:
+        """Return a clean list while preserving duplicate records."""
 
         if not isinstance(
             records,
             list,
         ):
-            return {}
+            return []
 
-        indexed_records: dict[
-            tuple[str, ...],
-            dict[str, Any],
-        ] = {}
-
-        duplicate_counts: dict[
-            tuple[str, ...],
-            int,
-        ] = {}
-
-        for raw_record in records:
-            if not isinstance(
-                raw_record,
+        return [
+            self._clean_record(
+                record
+            )
+            for record in records
+            if isinstance(
+                record,
                 dict,
+            )
+        ]
+
+    def _match_records(
+        self,
+        *,
+        previous_records: list[dict[str, str]],
+        current_records: list[dict[str, str]],
+    ) -> tuple[
+        list[
+            tuple[
+                dict[str, str],
+                dict[str, str],
+                dict[str, Any],
+            ]
+        ],
+        list[dict[str, str]],
+        list[dict[str, str]],
+    ]:
+        """
+        Match records in three conservative stages.
+
+        Stage 1 uses the full stable identity.
+        Stage 2 accepts the same audit name, type and year where only
+        the auditee wording changed.
+        Stage 3 uses fuzzy name matching within the same type and year,
+        but only where the best score is strong and unambiguous.
+        """
+
+        unmatched_previous = set(
+            range(
+                len(previous_records)
+            )
+        )
+
+        unmatched_current = set(
+            range(
+                len(current_records)
+            )
+        )
+
+        matches: list[
+            tuple[
+                dict[str, str],
+                dict[str, str],
+                dict[str, Any],
+            ]
+        ] = []
+
+        exact_candidates: dict[
+            tuple[str, ...],
+            list[int],
+        ] = {}
+
+        for current_index, record in enumerate(
+            current_records
+        ):
+            key = self._identity_key(
+                record,
+                self.EXACT_IDENTITY_FIELDS,
+            )
+
+            exact_candidates.setdefault(
+                key,
+                [],
+            ).append(
+                current_index
+            )
+
+        for previous_index, previous_record in enumerate(
+            previous_records
+        ):
+            key = self._identity_key(
+                previous_record,
+                self.EXACT_IDENTITY_FIELDS,
+            )
+
+            candidate_indexes = exact_candidates.get(
+                key,
+                [],
+            )
+
+            current_index = next(
+                (
+                    index
+                    for index in candidate_indexes
+                    if index in unmatched_current
+                ),
+                None,
+            )
+
+            if current_index is None:
+                continue
+
+            unmatched_previous.discard(
+                previous_index
+            )
+            unmatched_current.discard(
+                current_index
+            )
+
+            matches.append(
+                (
+                    previous_record,
+                    current_records[
+                        current_index
+                    ],
+                    self._match_information(
+                        previous_record=previous_record,
+                        current_record=current_records[
+                            current_index
+                        ],
+                        method="exact",
+                        score=1.0,
+                    ),
+                )
+            )
+
+        for previous_index in sorted(
+            tuple(
+                unmatched_previous
+            )
+        ):
+            previous_record = previous_records[
+                previous_index
+            ]
+
+            candidates = [
+                current_index
+                for current_index in unmatched_current
+                if (
+                    self._normalise_text(
+                        current_records[
+                            current_index
+                        ].get(
+                            "Audit Name",
+                            "",
+                        )
+                    )
+                    == self._normalise_text(
+                        previous_record.get(
+                            "Audit Name",
+                            "",
+                        )
+                    )
+                    and self._same_scope(
+                        previous_record,
+                        current_records[
+                            current_index
+                        ],
+                    )
+                )
+            ]
+
+            if len(candidates) != 1:
+                continue
+
+            current_index = candidates[0]
+
+            unmatched_previous.discard(
+                previous_index
+            )
+            unmatched_current.discard(
+                current_index
+            )
+
+            matches.append(
+                (
+                    previous_record,
+                    current_records[
+                        current_index
+                    ],
+                    self._match_information(
+                        previous_record=previous_record,
+                        current_record=current_records[
+                            current_index
+                        ],
+                        method="strong_identity",
+                        score=1.0,
+                    ),
+                )
+            )
+
+        possible_matches: list[
+            tuple[
+                float,
+                float,
+                int,
+                int,
+            ]
+        ] = []
+
+        for previous_index in unmatched_previous:
+            previous_record = previous_records[
+                previous_index
+            ]
+
+            scored_candidates: list[
+                tuple[
+                    float,
+                    int,
+                ]
+            ] = []
+
+            for current_index in unmatched_current:
+                current_record = current_records[
+                    current_index
+                ]
+
+                if not self._same_scope(
+                    previous_record,
+                    current_record,
+                ):
+                    continue
+
+                score = self._record_similarity(
+                    previous_record,
+                    current_record,
+                )
+
+                scored_candidates.append(
+                    (
+                        score,
+                        current_index,
+                    )
+                )
+
+            scored_candidates.sort(
+                reverse=True
+            )
+
+            if not scored_candidates:
+                continue
+
+            best_score, best_current = (
+                scored_candidates[0]
+            )
+
+            second_score = (
+                scored_candidates[1][0]
+                if len(
+                    scored_candidates
+                ) > 1
+                else 0.0
+            )
+
+            if (
+                best_score
+                >= self.FUZZY_MATCH_THRESHOLD
+                and (
+                    best_score
+                    - second_score
+                )
+                >= self.FUZZY_MATCH_MARGIN
+            ):
+                possible_matches.append(
+                    (
+                        best_score,
+                        second_score,
+                        previous_index,
+                        best_current,
+                    )
+                )
+
+        possible_matches.sort(
+            reverse=True
+        )
+
+        for (
+            best_score,
+            _,
+            previous_index,
+            current_index,
+        ) in possible_matches:
+            if (
+                previous_index
+                not in unmatched_previous
+                or current_index
+                not in unmatched_current
             ):
                 continue
 
-            record = self._clean_record(
-                raw_record
+            previous_record = previous_records[
+                previous_index
+            ]
+
+            current_record = current_records[
+                current_index
+            ]
+
+            unmatched_previous.discard(
+                previous_index
+            )
+            unmatched_current.discard(
+                current_index
             )
 
-            base_key = tuple(
-                self._normalise_text(
-                    record.get(
-                        field,
-                        "",
+            matches.append(
+                (
+                    previous_record,
+                    current_record,
+                    self._match_information(
+                        previous_record=previous_record,
+                        current_record=current_record,
+                        method="fuzzy",
+                        score=best_score,
+                    ),
+                )
+            )
+
+        return (
+            matches,
+            [
+                previous_records[index]
+                for index in sorted(
+                    unmatched_previous
+                )
+            ],
+            [
+                current_records[index]
+                for index in sorted(
+                    unmatched_current
+                )
+            ],
+        )
+
+    @classmethod
+    def _identity_key(
+        cls,
+        record: dict[str, Any],
+        fields: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        """Build a normalised identity key."""
+
+        return tuple(
+            cls._normalise_text(
+                record.get(
+                    field,
+                    "",
+                )
+            )
+            for field in fields
+        )
+
+    @classmethod
+    def _same_scope(
+        cls,
+        previous_record: dict[str, Any],
+        current_record: dict[str, Any],
+    ) -> bool:
+        """Require the same audit type and year for fuzzy matching."""
+
+        return cls._identity_key(
+            previous_record,
+            cls.FUZZY_SCOPE_FIELDS,
+        ) == cls._identity_key(
+            current_record,
+            cls.FUZZY_SCOPE_FIELDS,
+        )
+
+    @classmethod
+    def _record_similarity(
+        cls,
+        previous_record: dict[str, Any],
+        current_record: dict[str, Any],
+    ) -> float:
+        """Calculate a conservative weighted identity similarity."""
+
+        previous_auditee = cls._normalise_text(
+            previous_record.get(
+                "Auditee Name",
+                "",
+            )
+        )
+        current_auditee = cls._normalise_text(
+            current_record.get(
+                "Auditee Name",
+                "",
+            )
+        )
+        previous_audit = cls._normalise_text(
+            previous_record.get(
+                "Audit Name",
+                "",
+            )
+        )
+        current_audit = cls._normalise_text(
+            current_record.get(
+                "Audit Name",
+                "",
+            )
+        )
+
+        auditee_score = SequenceMatcher(
+            None,
+            previous_auditee,
+            current_auditee,
+        ).ratio()
+
+        audit_score = SequenceMatcher(
+            None,
+            previous_audit,
+            current_audit,
+        ).ratio()
+
+        if not previous_auditee or not current_auditee:
+            auditee_score = 0.0
+
+        if not previous_audit or not current_audit:
+            audit_score = 0.0
+
+        return round(
+            (
+                auditee_score
+                * 0.45
+            )
+            + (
+                audit_score
+                * 0.55
+            ),
+            4,
+        )
+
+    @classmethod
+    def _match_information(
+        cls,
+        *,
+        previous_record: dict[str, Any],
+        current_record: dict[str, Any],
+        method: str,
+        score: float,
+    ) -> dict[str, Any]:
+        """Describe how two records were matched."""
+
+        changed_fields = []
+
+        for field in (
+            "Auditee Name",
+            "Audit Name",
+        ):
+            previous_value = str(
+                previous_record.get(
+                    field,
+                    "",
+                )
+            ).strip()
+
+            current_value = str(
+                current_record.get(
+                    field,
+                    "",
+                )
+            ).strip()
+
+            if (
+                cls._normalise_text(
+                    previous_value
+                )
+                != cls._normalise_text(
+                    current_value
+                )
+            ):
+                changed_fields.append(
+                    (
+                        f"{field}: "
+                        f"'{previous_value or 'Not set'}' → "
+                        f"'{current_value or 'Not set'}'"
                     )
                 )
-                for field in self.MATCH_FIELDS
-            )
 
-            duplicate_number = (
-                duplicate_counts.get(
-                    base_key,
-                    0,
+        method_labels = {
+            "exact": "Exact match",
+            "strong_identity": "Matched by audit identity",
+            "fuzzy": "Matched after minor name change",
+        }
+
+        return {
+            "match_method": method,
+            "match_method_label": (
+                method_labels.get(
+                    method,
+                    method.title(),
                 )
-            )
-
-            duplicate_counts[
-                base_key
-            ] = duplicate_number + 1
-
-            comparison_key = (
-                *base_key,
-                str(duplicate_number),
-            )
-
-            indexed_records[
-                comparison_key
-            ] = record
-
-        return indexed_records
+            ),
+            "match_score": round(
+                score * 100,
+                1,
+            ),
+            "identity_changed": bool(
+                changed_fields
+            ),
+            "identity_change_text": "; ".join(
+                changed_fields
+            ),
+        }
 
     @classmethod
     def _clean_record(
@@ -1139,13 +1658,30 @@ class ComparisonService:
     ) -> str:
         """Normalise text for matching and sorting."""
 
+        text = unicodedata.normalize(
+            "NFKD",
+            str(value or ""),
+        )
+
+        text = "".join(
+            character
+            for character in text
+            if not unicodedata.combining(
+                character
+            )
+        )
+
+        text = re.sub(
+            r"[^a-zA-Z0-9]+",
+            " ",
+            text,
+        )
+
         return re.sub(
             r"\s+",
             " ",
-            str(value or "")
-            .strip()
-            .lower(),
-        )
+            text,
+        ).strip().lower()
 
     @staticmethod
     def _format_number(
