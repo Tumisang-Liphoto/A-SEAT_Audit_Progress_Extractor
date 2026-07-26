@@ -1,62 +1,49 @@
 import webbrowser
-from urllib.parse import urlparse
+
+from src.services.aseat_url_service import ASeatUrlService
 
 
 class BrowserService:
-    """Opens web addresses using the user's default browser."""
+    """Open A-SEAT using the user's default browser."""
 
     @staticmethod
     def normalise_url(url: str) -> str:
-        """Add HTTPS when the user enters an address without a scheme."""
+        """Resolve the configured address to the A-SEAT login page."""
 
-        cleaned_url = url.strip()
-
-        if not cleaned_url:
+        if not url.strip():
             return ""
 
-        parsed_url = urlparse(cleaned_url)
-
-        if not parsed_url.scheme:
-            cleaned_url = f"https://{cleaned_url}"
-
-        return cleaned_url
+        return ASeatUrlService.resolve(url).login_url
 
     @staticmethod
     def is_valid_url(url: str) -> bool:
-        """Check whether the supplied address is a usable HTTP or HTTPS URL."""
+        """Check whether the supplied address resolves successfully."""
 
-        if not url:
+        try:
+            ASeatUrlService.resolve(url)
+            return True
+        except ValueError:
             return False
 
-        parsed_url = urlparse(url)
-
-        return (
-            parsed_url.scheme in {"http", "https"}
-            and bool(parsed_url.netloc)
-        )
-
     def open_url(self, url: str) -> tuple[bool, str]:
-        """Open a URL in the default browser."""
+        """Open the resolved A-SEAT login page."""
 
-        normalised_url = self.normalise_url(url)
-
-        if not self.is_valid_url(normalised_url):
-            return False, "The configured A-SEAT address is not valid."
+        try:
+            resolved_url = ASeatUrlService.resolve(url).login_url
+        except ValueError as error:
+            return False, str(error)
 
         try:
             opened = webbrowser.open(
-                normalised_url,
+                resolved_url,
                 new=2,
                 autoraise=True,
             )
 
             if not opened:
-                return (
-                    False,
-                    "Windows could not open the default web browser.",
-                )
+                return False, "Windows could not open the default web browser."
 
-            return True, normalised_url
+            return True, resolved_url
 
         except webbrowser.Error as error:
             return False, f"Browser error: {error}"

@@ -1,16 +1,16 @@
 import re
 from collections.abc import Callable
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
-
 from playwright.sync_api import Page, sync_playwright
+
+from src.services.aseat_url_service import ASeatUrlService
 
 
 ProgressCallback = Callable[[int, str], None]
 
 
 class AuditExtractor:
-    """Extracts audit progress information from LES-SEAT."""
+    """Extracts audit progress information from A-SEAT."""
 
     AUDIT_LIST_PATH = "/system/business_audit/project_list.php"
 
@@ -30,36 +30,11 @@ class AuditExtractor:
 
     @staticmethod
     def build_audit_list_url(configured_url: str) -> str:
-        """Build the LES-SEAT audit-list address from the saved URL."""
+        """Build the A-SEAT audit-list address from the saved URL."""
 
-        cleaned_url = configured_url.strip()
-
-        if not cleaned_url:
-            raise ValueError("The A-SEAT URL has not been configured.")
-
-        if not re.match(
-            r"^https?://",
-            cleaned_url,
-            flags=re.IGNORECASE,
-        ):
-            cleaned_url = f"http://{cleaned_url}"
-
-        parsed_url = urlsplit(cleaned_url)
-
-        if not parsed_url.hostname:
-            raise ValueError(
-                "The configured A-SEAT address is not valid."
-            )
-
-        return urlunsplit(
-            (
-                parsed_url.scheme,
-                parsed_url.netloc,
-                AuditExtractor.AUDIT_LIST_PATH,
-                "",
-                "",
-            )
-        )
+        return ASeatUrlService.resolve(
+            configured_url
+        ).audit_list_url
 
     @staticmethod
     def _login(
@@ -67,45 +42,51 @@ class AuditExtractor:
         username: str,
         password: str,
     ) -> None:
-        """Log in when the LES-SEAT login form is displayed."""
+        """Log in when the A-SEAT login form is displayed."""
 
         # The requested page may already be authenticated.
         if page.locator("#logout_btn").count() > 0:
             return
 
+        username_selector = (
+            "#user_login, input[name='user'], "
+            "input[name='user_login']"
+        )
+        password_selector = (
+            "#user_pass, input[name='pwd'], "
+            "input[name='user_pass'], input[type='password']"
+        )
+        submit_selector = (
+            "#submit, form#loginform input[type='submit'], "
+            "input[type='submit'][value='Login'], "
+            "button[type='submit']"
+        )
+
         try:
-            page.wait_for_selector(
-                "#user_login",
+            page.locator(username_selector).first.wait_for(
                 state="visible",
                 timeout=30_000,
             )
-
-            page.wait_for_selector(
-                "#user_pass",
+            page.locator(password_selector).first.wait_for(
                 state="visible",
                 timeout=30_000,
             )
 
         except Exception as error:
             raise RuntimeError(
-                "The LES-SEAT login form could not be detected.\n\n"
+                "The A-SEAT login form could not be detected.\n\n"
                 f"Current page: {page.url}\n"
                 f"Page title: {page.title()}"
             ) from error
 
-        page.locator("#user_login").fill(username)
-        page.locator("#user_pass").fill(password)
+        page.locator(username_selector).first.fill(username)
+        page.locator(password_selector).first.fill(password)
 
-        submit_button = page.locator("#submit")
-
-        if submit_button.count() == 0:
-            submit_button = page.locator(
-                "input[type='submit'], button[type='submit']"
-            ).first
+        submit_button = page.locator(submit_selector).first
 
         if submit_button.count() == 0:
             raise RuntimeError(
-                "The LES-SEAT login button could not be detected."
+                "The A-SEAT login button could not be detected."
             )
 
         submit_button.click()
@@ -120,7 +101,7 @@ class AuditExtractor:
 
         page.wait_for_timeout(1_000)
 
-        if page.locator("#user_login").count() > 0:
+        if page.locator(username_selector).count() > 0:
             login_error = ""
 
             if page.locator("#login_status").count() > 0:
@@ -132,11 +113,11 @@ class AuditExtractor:
 
             if login_error:
                 raise RuntimeError(
-                    f"LES-SEAT login failed: {login_error}"
+                    f"A-SEAT login failed: {login_error}"
                 )
 
             raise RuntimeError(
-                "LES-SEAT login was not successful. "
+                "A-SEAT login was not successful. "
                 "Check the username and password."
             )
 
@@ -508,7 +489,7 @@ class AuditExtractor:
         password: str,
         show_browser: bool = True,
     ) -> list[dict[str, Any]]:
-        """Open LES-SEAT, authenticate and extract the audit list."""
+        """Open A-SEAT, authenticate and extract the audit list."""
 
         if not username.strip():
             raise ValueError("A username is required.")
@@ -543,7 +524,7 @@ class AuditExtractor:
 
                 self._report_progress(
                     15,
-                    "Opening LES-SEAT",
+                    "Opening A-SEAT",
                 )
 
                 page.goto(

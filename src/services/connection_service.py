@@ -1,66 +1,34 @@
-import re
 import time
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
 
 import requests
+
+from src.services.aseat_url_service import ASeatUrlService
 
 
 class ConnectionService:
     """Test whether the configured A-SEAT system is reachable."""
 
-    LOGIN_PATH = "/system/"
-
     @classmethod
-    def build_test_url(
-        cls,
-        configured_url: str,
-    ) -> str:
-        """Build the system login-page URL."""
+    def build_test_url(cls, configured_url: str) -> str:
+        """Build the resolved A-SEAT login-page URL."""
 
-        cleaned_url = configured_url.strip()
-
-        if not cleaned_url:
-            raise ValueError(
-                "Enter the system URL before testing the connection."
-            )
-
-        if not re.match(
-            r"^https?://",
-            cleaned_url,
-            flags=re.IGNORECASE,
-        ):
-            cleaned_url = f"http://{cleaned_url}"
-
-        parsed_url = urlsplit(cleaned_url)
-
-        if not parsed_url.hostname:
-            raise ValueError(
-                "The configured system URL is not valid."
-            )
-
-        return urlunsplit(
-            (
-                parsed_url.scheme,
-                parsed_url.netloc,
-                cls.LOGIN_PATH,
-                "",
-                "",
-            )
-        )
+        return ASeatUrlService.resolve(configured_url).login_url
 
     @staticmethod
     def _detect_login_page(
         html: str,
         system_name: str,
     ) -> tuple[bool, str]:
-        """Confirm that the returned page contains the login form."""
+        """Confirm that the returned page contains an A-SEAT login form."""
 
         normalised_html = html.lower()
 
         username_markers = (
             'id="user_login"',
             "id='user_login'",
+            'name="user"',
+            "name='user'",
             'name="user_login"',
             "name='user_login'",
         )
@@ -68,38 +36,39 @@ class ConnectionService:
         password_markers = (
             'id="user_pass"',
             "id='user_pass'",
+            'name="pwd"',
+            "name='pwd'",
             'name="user_pass"',
             "name='user_pass'",
         )
 
-        has_username = any(
-            marker in normalised_html
-            for marker in username_markers
+        submit_markers = (
+            'id="submit"',
+            "id='submit'",
+            'id="loginform"',
+            "id='loginform'",
+            'value="login"',
+            "value='login'",
         )
 
-        has_password = any(
-            marker in normalised_html
-            for marker in password_markers
-        )
+        has_username = any(marker in normalised_html for marker in username_markers)
+        has_password = any(marker in normalised_html for marker in password_markers)
+        has_submit = any(marker in normalised_html for marker in submit_markers)
+
+        if has_username and has_password and has_submit:
+            return True, f"{system_name} login page detected."
 
         if has_username and has_password:
-            return (
-                True,
-                f"{system_name} login page detected.",
-            )
+            return True, f"{system_name} login fields detected."
 
-        if has_username or has_password:
+        if has_username or has_password or has_submit:
             return (
                 False,
-                (
-                    "The server responded and part of the login form "
-                    "was detected, but the complete "
-                    f"{system_name} login page was not confirmed."
-                ),
+                "The server responded and part of the login form was detected, "
+                f"but the complete {system_name} login page was not confirmed.",
             )
 
         system_name_marker = system_name.lower().strip()
-
         generic_system_markers = (
             "a-seat",
             "aseat",
@@ -110,31 +79,21 @@ class ConnectionService:
             "user_pass",
         )
 
-        system_recognised = (
-            bool(system_name_marker)
-            and system_name_marker in normalised_html
-        )
-
+        system_recognised = bool(system_name_marker) and system_name_marker in normalised_html
         generic_system_recognised = any(
-            marker in normalised_html
-            for marker in generic_system_markers
+            marker in normalised_html for marker in generic_system_markers
         )
 
         if system_recognised or generic_system_recognised:
             return (
                 False,
-                (
-                    f"The {system_name} server appears reachable, "
-                    "but the login page was not detected."
-                ),
+                f"The {system_name} server appears reachable, but the login page was not detected.",
             )
 
         return (
             False,
-            (
-                "The server responded, but the returned page was not "
-                f"recognised as the {system_name} login page."
-            ),
+            "The server responded, but the returned page was not "
+            f"recognised as the {system_name} login page.",
         )
 
     def test_connection(
@@ -146,11 +105,8 @@ class ConnectionService:
         """Test whether the configured system login page is reachable."""
 
         display_name = system_name.strip() or "A-SEAT"
-
-        test_url = self.build_test_url(
-            configured_url
-        )
-
+        resolved = ASeatUrlService.resolve(configured_url)
+        test_url = resolved.login_url
         started_at = time.perf_counter()
 
         try:
@@ -160,9 +116,7 @@ class ConnectionService:
                 allow_redirects=True,
                 verify=True,
                 headers={
-                    "User-Agent": (
-                        "A-SEAT-Audit-Progress-Extractor/0.1"
-                    ),
+                    "User-Agent": "A-SEAT-Audit-Progress-Extractor/0.1",
                     "Accept": (
                         "text/html,application/xhtml+xml,"
                         "application/xml;q=0.9,*/*;q=0.8"
@@ -195,13 +149,9 @@ class ConnectionService:
             ) from error
 
         except requests.exceptions.RequestException as error:
-            raise RuntimeError(
-                f"The connection test failed: {error}"
-            ) from error
+            raise RuntimeError(f"The connection test failed: {error}") from error
 
-        elapsed_seconds = (
-            time.perf_counter() - started_at
-        )
+        elapsed_seconds = time.perf_counter() - started_at
 
         if response.status_code >= 500:
             raise RuntimeError(
@@ -211,8 +161,7 @@ class ConnectionService:
 
         if response.status_code >= 400:
             raise RuntimeError(
-                f"The {display_name} server returned "
-                f"HTTP {response.status_code}."
+                f"The {display_name} server returned HTTP {response.status_code}."
             )
 
         login_detected, message = self._detect_login_page(
@@ -225,6 +174,8 @@ class ConnectionService:
             "status_code": response.status_code,
             "requested_url": test_url,
             "final_url": response.url,
+            "resolved_login_url": resolved.login_url,
+            "resolved_dashboard_url": resolved.dashboard_url,
             "response_time": elapsed_seconds,
             "message": message,
         }
