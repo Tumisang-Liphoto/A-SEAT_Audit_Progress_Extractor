@@ -28,12 +28,33 @@ class DashboardPage(QWidget):
     """Application dashboard and latest extraction comparison."""
 
     STATUS_FILTERS = {
-        "All changes": "",
+        "All movements": "",
         "Progressed": "progressed",
         "No change": "unchanged",
         "Regressed": "regressed",
         "New audits": "new",
-        "Missing audits": "missing",
+        "No longer listed": "missing",
+        "Not comparable": "not_comparable",
+    }
+
+    DELIVERY_FILTERS = {
+        "All delivery statuses": "",
+        "Completed": "completed",
+        "Overdue": "overdue",
+        "Due soon": "due_soon",
+        "Not started late": "not_started_late",
+        "In progress": "in_progress",
+        "Not yet started": "not_yet_started",
+        "Data issues": "__data_issues__",
+        "Not currently listed": "not_currently_listed",
+    }
+
+    DATA_ISSUE_STATUSES = {
+        "missing_progress",
+        "invalid_progress",
+        "progress_year_mismatch",
+        "missing_dates",
+        "invalid_dates",
     }
 
     STATUS_LABELS = {
@@ -41,7 +62,8 @@ class DashboardPage(QWidget):
         "unchanged": "No change",
         "regressed": "Regressed",
         "new": "New audit",
-        "missing": "Missing audit",
+        "missing": "No longer listed",
+        "not_comparable": "Not comparable",
     }
 
     def __init__(
@@ -352,6 +374,15 @@ class DashboardPage(QWidget):
             icon_name="fa5s.exclamation-circle",
         )
 
+        (
+            not_comparable_card,
+            self.not_comparable_value,
+            self.not_comparable_detail,
+        ) = self._create_metric_card(
+            title="Not comparable",
+            icon_name="fa5s.question-circle",
+        )
+
         cards_layout.addWidget(
             audits_card,
             0,
@@ -382,9 +413,137 @@ class DashboardPage(QWidget):
             1,
             2,
         )
+        cards_layout.addWidget(
+            not_comparable_card,
+            2,
+            0,
+            1,
+            3,
+        )
 
         comparison_layout.addLayout(
             cards_layout
+        )
+
+        delivery_heading = QLabel(
+            "Current Delivery Status"
+        )
+        delivery_heading.setObjectName(
+            "comparisonDetailsHeading"
+        )
+
+        self.delivery_date_label = QLabel(
+            "Delivery status will be assessed after a comparison is available."
+        )
+        self.delivery_date_label.setObjectName(
+            "dashboardDetail"
+        )
+        self.delivery_date_label.setWordWrap(True)
+
+        comparison_layout.addWidget(
+            delivery_heading
+        )
+        comparison_layout.addWidget(
+            self.delivery_date_label
+        )
+
+        delivery_cards_layout = QGridLayout()
+        delivery_cards_layout.setHorizontalSpacing(12)
+        delivery_cards_layout.setVerticalSpacing(12)
+
+        for column in range(3):
+            delivery_cards_layout.setColumnStretch(
+                column,
+                1,
+            )
+
+        (
+            completed_card,
+            self.completed_value,
+            self.completed_detail,
+        ) = self._create_metric_card(
+            title="Completed",
+            icon_name="fa5s.check-circle",
+        )
+
+        (
+            overdue_card,
+            self.overdue_value,
+            self.overdue_detail,
+        ) = self._create_metric_card(
+            title="Overdue",
+            icon_name="fa5s.clock",
+        )
+
+        (
+            due_soon_card,
+            self.due_soon_value,
+            self.due_soon_detail,
+        ) = self._create_metric_card(
+            title="Due soon",
+            icon_name="fa5s.hourglass-half",
+        )
+
+        (
+            not_started_late_card,
+            self.not_started_late_value,
+            self.not_started_late_detail,
+        ) = self._create_metric_card(
+            title="Not started late",
+            icon_name="fa5s.pause-circle",
+        )
+
+        (
+            in_progress_card,
+            self.in_progress_value,
+            self.in_progress_detail,
+        ) = self._create_metric_card(
+            title="In progress",
+            icon_name="fa5s.tasks",
+        )
+
+        (
+            data_issues_card,
+            self.data_issues_value,
+            self.data_issues_detail,
+        ) = self._create_metric_card(
+            title="Data issues",
+            icon_name="fa5s.exclamation-triangle",
+        )
+
+        delivery_cards_layout.addWidget(
+            completed_card,
+            0,
+            0,
+        )
+        delivery_cards_layout.addWidget(
+            overdue_card,
+            0,
+            1,
+        )
+        delivery_cards_layout.addWidget(
+            due_soon_card,
+            0,
+            2,
+        )
+        delivery_cards_layout.addWidget(
+            not_started_late_card,
+            1,
+            0,
+        )
+        delivery_cards_layout.addWidget(
+            in_progress_card,
+            1,
+            1,
+        )
+        delivery_cards_layout.addWidget(
+            data_issues_card,
+            1,
+            2,
+        )
+
+        comparison_layout.addLayout(
+            delivery_cards_layout
         )
 
         self.comparison_message_label = QLabel(
@@ -416,13 +575,15 @@ class DashboardPage(QWidget):
         filter_layout = QHBoxLayout()
 
         details_heading = QLabel(
-            "Recent Movements"
+            "Audit-Level Analysis"
         )
         details_heading.setObjectName(
             "comparisonDetailsHeading"
         )
 
-        filter_label = QLabel("Show:")
+        movement_filter_label = QLabel(
+            "Movement:"
+        )
 
         self.status_filter_combo = QComboBox()
         self.status_filter_combo.addItems(
@@ -431,9 +592,26 @@ class DashboardPage(QWidget):
             )
         )
         self.status_filter_combo.setMaximumWidth(
-            180
+            190
         )
         self.status_filter_combo.currentTextChanged.connect(
+            self._apply_comparison_filter
+        )
+
+        delivery_filter_label = QLabel(
+            "Delivery:"
+        )
+
+        self.delivery_filter_combo = QComboBox()
+        self.delivery_filter_combo.addItems(
+            list(
+                self.DELIVERY_FILTERS.keys()
+            )
+        )
+        self.delivery_filter_combo.setMaximumWidth(
+            210
+        )
+        self.delivery_filter_combo.currentTextChanged.connect(
             self._apply_comparison_filter
         )
 
@@ -442,23 +620,31 @@ class DashboardPage(QWidget):
         )
         filter_layout.addStretch()
         filter_layout.addWidget(
-            filter_label
+            movement_filter_label
         )
         filter_layout.addWidget(
             self.status_filter_combo
         )
+        filter_layout.addWidget(
+            delivery_filter_label
+        )
+        filter_layout.addWidget(
+            self.delivery_filter_combo
+        )
 
         self.comparison_table = QTableWidget()
-        self.comparison_table.setColumnCount(7)
+        self.comparison_table.setColumnCount(9)
         self.comparison_table.setHorizontalHeaderLabels(
             [
                 "Auditee",
                 "Audit Name",
-                "Audit Type",
+                "Audit Lead",
+                "Planned Completion",
                 "Previous",
                 "Current",
                 "Movement",
-                "Status",
+                "Delivery Status",
+                "Issue",
             ]
         )
         self.comparison_table.setEditTriggers(
@@ -506,6 +692,14 @@ class DashboardPage(QWidget):
         header.setSectionResizeMode(
             6,
             QHeaderView.ResizeMode.ResizeToContents,
+        )
+        header.setSectionResizeMode(
+            7,
+            QHeaderView.ResizeMode.ResizeToContents,
+        )
+        header.setSectionResizeMode(
+            8,
+            QHeaderView.ResizeMode.Stretch,
         )
 
         details_layout.addLayout(
@@ -846,6 +1040,15 @@ class DashboardPage(QWidget):
                 regressed=0,
                 new=0,
                 missing=0,
+                not_comparable=0,
+            )
+            self._set_delivery_values(
+                completed=0,
+                overdue=0,
+                due_soon=0,
+                not_started_late=0,
+                in_progress=0,
+                data_issues=0,
             )
 
             self.comparison_date_label.setText(
@@ -902,6 +1105,12 @@ class DashboardPage(QWidget):
                 0,
             )
         )
+        not_comparable = self._safe_int(
+            summary.get(
+                "not_comparable",
+                0,
+            )
+        )
 
         self._set_comparison_values(
             audits_compared=audits_compared,
@@ -910,6 +1119,77 @@ class DashboardPage(QWidget):
             regressed=regressed,
             new=new,
             missing=missing,
+            not_comparable=not_comparable,
+        )
+
+        delivery_summary = comparison.get(
+            "delivery_summary",
+            {},
+        )
+
+        completed = self._safe_int(
+            delivery_summary.get(
+                "completed",
+                0,
+            )
+        )
+        overdue = self._safe_int(
+            delivery_summary.get(
+                "overdue",
+                0,
+            )
+        )
+        due_soon = self._safe_int(
+            delivery_summary.get(
+                "due_soon",
+                0,
+            )
+        )
+        not_started_late = self._safe_int(
+            delivery_summary.get(
+                "not_started_late",
+                0,
+            )
+        )
+        in_progress = self._safe_int(
+            delivery_summary.get(
+                "in_progress",
+                0,
+            )
+        )
+        data_issues = sum(
+            self._safe_int(
+                delivery_summary.get(
+                    key,
+                    0,
+                )
+            )
+            for key in self.DATA_ISSUE_STATUSES
+        )
+
+        self._set_delivery_values(
+            completed=completed,
+            overdue=overdue,
+            due_soon=due_soon,
+            not_started_late=not_started_late,
+            in_progress=in_progress,
+            data_issues=data_issues,
+        )
+
+        assessment_date = str(
+            comparison.get(
+                "assessment_display_date",
+                "",
+            )
+        ).strip()
+
+        self.delivery_date_label.setText(
+            (
+                "Status assessed as at "
+                f"{assessment_date}."
+                if assessment_date
+                else "Status assessed using the latest extraction date."
+            )
         )
 
         previous_date = str(
@@ -990,6 +1270,15 @@ class DashboardPage(QWidget):
             regressed=0,
             new=0,
             missing=0,
+            not_comparable=0,
+        )
+        self._set_delivery_values(
+            completed=0,
+            overdue=0,
+            due_soon=0,
+            not_started_late=0,
+            in_progress=0,
+            data_issues=0,
         )
 
         self.comparison_date_label.setText(
@@ -1013,8 +1302,9 @@ class DashboardPage(QWidget):
         regressed: int,
         new: int,
         missing: int,
+        not_comparable: int,
     ) -> None:
-        """Update the six comparison cards."""
+        """Update the movement comparison cards."""
 
         self.audits_compared_value.setText(
             str(audits_compared)
@@ -1033,6 +1323,9 @@ class DashboardPage(QWidget):
         )
         self.missing_value.setText(
             str(missing)
+        )
+        self.not_comparable_value.setText(
+            str(not_comparable)
         )
 
         comparable_total = (
@@ -1074,7 +1367,80 @@ class DashboardPage(QWidget):
             (
                 "Not found in latest extract"
                 if missing
-                else "No missing audits"
+                else "No audits removed"
+            )
+        )
+        self.not_comparable_detail.setText(
+            (
+                "Progress requires review"
+                if not_comparable
+                else "All progress is comparable"
+            )
+        )
+
+    def _set_delivery_values(
+        self,
+        *,
+        completed: int,
+        overdue: int,
+        due_soon: int,
+        not_started_late: int,
+        in_progress: int,
+        data_issues: int,
+    ) -> None:
+        """Update current delivery-status cards."""
+
+        self.completed_value.setText(
+            str(completed)
+        )
+        self.overdue_value.setText(
+            str(overdue)
+        )
+        self.due_soon_value.setText(
+            str(due_soon)
+        )
+        self.not_started_late_value.setText(
+            str(not_started_late)
+        )
+        self.in_progress_value.setText(
+            str(in_progress)
+        )
+        self.data_issues_value.setText(
+            str(data_issues)
+        )
+
+        self.completed_detail.setText(
+            "Progress recorded at 100%"
+        )
+        self.overdue_detail.setText(
+            (
+                "Requires management attention"
+                if overdue
+                else "No overdue audits"
+            )
+        )
+        self.due_soon_detail.setText(
+            (
+                "Due within 30 days"
+                if due_soon
+                else "No audits due soon"
+            )
+        )
+        self.not_started_late_detail.setText(
+            (
+                "Start date passed at 0%"
+                if not_started_late
+                else "No late starts"
+            )
+        )
+        self.in_progress_detail.setText(
+            "Started and not yet completed"
+        )
+        self.data_issues_detail.setText(
+            (
+                "Progress or date data needs review"
+                if data_issues
+                else "No data issues detected"
             )
         )
 
@@ -1115,9 +1481,7 @@ class DashboardPage(QWidget):
         )
 
         if self.details_visible:
-            self._apply_comparison_filter(
-                self.status_filter_combo.currentText()
-            )
+            self._apply_comparison_filter()
 
     def _hide_details(self) -> None:
         self.details_visible = False
@@ -1130,31 +1494,61 @@ class DashboardPage(QWidget):
 
     def _apply_comparison_filter(
         self,
-        filter_text: str,
+        *_: Any,
     ) -> None:
-        """Filter the detail table by movement classification."""
+        """Filter by movement and delivery status."""
 
         selected_status = (
             self.STATUS_FILTERS.get(
-                filter_text,
+                self.status_filter_combo.currentText(),
                 "",
             )
         )
 
-        filtered_rows = [
-            row
-            for row in self.comparison_rows
-            if (
-                not selected_status
-                or str(
-                    row.get(
-                        "status",
-                        "",
-                    )
-                )
-                == selected_status
+        selected_delivery = (
+            self.DELIVERY_FILTERS.get(
+                self.delivery_filter_combo.currentText(),
+                "",
             )
-        ]
+        )
+
+        filtered_rows: list[dict[str, Any]] = []
+
+        for row in self.comparison_rows:
+            row_status = str(
+                row.get(
+                    "status",
+                    "",
+                )
+            )
+            delivery_status = str(
+                row.get(
+                    "delivery_status",
+                    "",
+                )
+            )
+
+            if (
+                selected_status
+                and row_status != selected_status
+            ):
+                continue
+
+            if selected_delivery == "__data_issues__":
+                if (
+                    delivery_status
+                    not in self.DATA_ISSUE_STATUSES
+                ):
+                    continue
+            elif (
+                selected_delivery
+                and delivery_status != selected_delivery
+            ):
+                continue
+
+            filtered_rows.append(
+                row
+            )
 
         self._populate_comparison_table(
             filtered_rows
@@ -1181,7 +1575,11 @@ class DashboardPage(QWidget):
                     "",
                 ),
                 row.get(
-                    "Audit Type",
+                    "Audit Lead",
+                    "",
+                ),
+                row.get(
+                    "Planned Completion Date",
                     "",
                 ),
                 row.get(
@@ -1197,16 +1595,12 @@ class DashboardPage(QWidget):
                     "",
                 ),
                 row.get(
-                    "status_label",
-                    self.STATUS_LABELS.get(
-                        str(
-                            row.get(
-                                "status",
-                                "",
-                            )
-                        ),
-                        "",
-                    ),
+                    "delivery_status_label",
+                    "",
+                ),
+                row.get(
+                    "delivery_issue",
+                    "",
                 ),
             ]
 
@@ -1222,6 +1616,7 @@ class DashboardPage(QWidget):
                     4,
                     5,
                     6,
+                    7,
                 }:
                     item.setTextAlignment(
                         int(
