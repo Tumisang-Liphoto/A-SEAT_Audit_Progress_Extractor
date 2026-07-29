@@ -20,14 +20,22 @@ class ExportService:
     def _create_output_directory(
         base_folder: str,
     ) -> Path:
-        output_directory = Path(base_folder).expanduser()
+        """Create and return the monthly output directory."""
+
+        output_directory = Path(
+            base_folder
+        ).expanduser()
 
         if not output_directory.is_absolute():
-            output_directory = output_directory.resolve()
+            output_directory = (
+                output_directory.resolve()
+            )
 
         month_directory = (
             output_directory
-            / datetime.now().strftime("%Y-%m")
+            / datetime.now().strftime(
+                "%Y-%m"
+            )
         )
 
         month_directory.mkdir(
@@ -42,6 +50,8 @@ class ExportService:
         extension: str,
         audit_year: str = "",
     ) -> str:
+        """Create a descriptive timestamped output filename."""
+
         timestamp = datetime.now().strftime(
             "%Y-%m-%d_%H-%M-%S"
         )
@@ -53,14 +63,15 @@ class ExportService:
         )
 
         year_section = (
-            f"_{safe_year}"
+            f"_AuditYear-{safe_year}"
             if safe_year
             else ""
         )
 
         return (
-            f"A-SEAT_Audit_Progress"
-            f"{year_section}_{timestamp}.{extension}"
+            "A-SEAT_Audit_Progress"
+            f"{year_section}"
+            f"_Extracted-{timestamp}.{extension}"
         )
 
     @staticmethod
@@ -80,12 +91,16 @@ class ExportService:
         cls,
         records: list[dict[str, Any]],
     ) -> pd.DataFrame:
+        """Prepare extracted records for export."""
+
         if not records:
             raise ValueError(
                 "There are no extracted records to export."
             )
 
-        dataframe = pd.DataFrame(records)
+        dataframe = pd.DataFrame(
+            records
+        )
 
         expected_columns = [
             "Auditee Name",
@@ -103,17 +118,25 @@ class ExportService:
             if column not in dataframe.columns:
                 dataframe[column] = ""
 
-        dataframe = dataframe[expected_columns]
+        dataframe = dataframe[
+            expected_columns
+        ]
 
         for date_column in cls.DATE_COLUMNS:
-            dataframe[date_column] = pd.to_datetime(
-                dataframe[date_column],
+            dataframe[
+                date_column
+            ] = pd.to_datetime(
+                dataframe[
+                    date_column
+                ],
                 errors="coerce",
             )
 
         dataframe = dataframe.rename(
             columns={
-                "Progress": cls._progress_heading(),
+                "Progress": (
+                    cls._progress_heading()
+                ),
             }
         )
 
@@ -127,8 +150,10 @@ class ExportService:
     ) -> Path:
         """Export audit records to a formatted Excel workbook."""
 
-        output_directory = self._create_output_directory(
-            output_folder
+        output_directory = (
+            self._create_output_directory(
+                output_folder
+            )
         )
 
         output_path = (
@@ -139,11 +164,15 @@ class ExportService:
             )
         )
 
-        dataframe = self._prepare_dataframe(
-            records
+        dataframe = (
+            self._prepare_dataframe(
+                records
+            )
         )
 
-        progress_heading = self._progress_heading()
+        progress_heading = (
+            self._progress_heading()
+        )
 
         with pd.ExcelWriter(
             output_path,
@@ -171,8 +200,10 @@ class ExportService:
             }
 
             for date_heading in self.DATE_COLUMNS:
-                column_number = header_map.get(
-                    date_heading
+                column_number = (
+                    header_map.get(
+                        date_heading
+                    )
                 )
 
                 if column_number is None:
@@ -189,8 +220,10 @@ class ExportService:
                         "dd mmmm yyyy"
                     )
 
-            progress_column = header_map.get(
-                progress_heading
+            progress_column = (
+                header_map.get(
+                    progress_heading
+                )
             )
 
             if progress_column is not None:
@@ -210,10 +243,16 @@ class ExportService:
 
                     if (
                         cell.value
-                        and "\n" in str(cell.value)
+                        and "\n" in str(
+                            cell.value
+                        )
                     ):
                         line_count = (
-                            str(cell.value).count("\n")
+                            str(
+                                cell.value
+                            ).count(
+                                "\n"
+                            )
                             + 1
                         )
 
@@ -228,12 +267,17 @@ class ExportService:
                 maximum_length = 0
 
                 column_letter = (
-                    column_cells[0].column_letter
+                    column_cells[
+                        0
+                    ].column_letter
                 )
 
                 for cell in column_cells:
                     value_length = len(
-                        str(cell.value or "")
+                        str(
+                            cell.value
+                            or ""
+                        )
                     )
 
                     maximum_length = max(
@@ -277,7 +321,10 @@ class ExportService:
 
         if output_path.suffix.lower() != ".xlsx":
             raise ValueError(
-                "Analysis sheets can only be added to .xlsx files."
+                (
+                    "Analysis sheets can only be added "
+                    "to .xlsx files."
+                )
             )
 
         workbook = load_workbook(
@@ -329,21 +376,26 @@ class ExportService:
             "solid",
             fgColor="17365D",
         )
+
         section_fill = PatternFill(
             "solid",
             fgColor="D9EAF7",
         )
+
         header_fill = PatternFill(
             "solid",
             fgColor="5B9BD5",
         )
+
         white_font = Font(
             color="FFFFFF",
             bold=True,
         )
+
         bold_font = Font(
             bold=True
         )
+
         thin_border = Border(
             left=Side(
                 style="thin",
@@ -363,26 +415,38 @@ class ExportService:
             ),
         )
 
-        worksheet.sheet_view.showGridLines = False
+        worksheet.sheet_view.showGridLines = (
+            False
+        )
+
         worksheet.freeze_panes = "A5"
 
         worksheet.merge_cells(
             "A1:D1"
         )
+
         worksheet["A1"] = (
             "A-SEAT Audit Progress Analysis Summary"
         )
-        worksheet["A1"].fill = title_fill
+
+        worksheet["A1"].fill = (
+            title_fill
+        )
+
         worksheet["A1"].font = Font(
             color="FFFFFF",
             bold=True,
             size=16,
         )
+
         worksheet["A1"].alignment = Alignment(
             horizontal="center",
             vertical="center",
         )
-        worksheet.row_dimensions[1].height = 28
+
+        worksheet.row_dimensions[
+            1
+        ].height = 28
 
         assessment_date = str(
             comparison.get(
@@ -405,9 +469,18 @@ class ExportService:
             )
         ).strip()
 
-        worksheet["A3"] = "Assessment date"
-        worksheet["B3"] = assessment_date
-        worksheet["C3"] = "Comparison period"
+        worksheet["A3"] = (
+            "Assessment date"
+        )
+
+        worksheet["B3"] = (
+            assessment_date
+        )
+
+        worksheet["C3"] = (
+            "Comparison period"
+        )
+
         worksheet["D3"] = (
             f"{previous_date} to {current_date}"
             if previous_date or current_date
@@ -421,8 +494,13 @@ class ExportService:
                 wrap_text=True,
             )
 
-        worksheet["A3"].font = bold_font
-        worksheet["C3"].font = bold_font
+        worksheet["A3"].font = (
+            bold_font
+        )
+
+        worksheet["C3"].font = (
+            bold_font
+        )
 
         summary = comparison.get(
             "summary",
@@ -580,11 +658,19 @@ class ExportService:
         worksheet.merge_cells(
             "A5:B5"
         )
+
         worksheet["A5"] = (
             "Progress Movement"
         )
-        worksheet["A5"].fill = section_fill
-        worksheet["A5"].font = bold_font
+
+        worksheet["A5"].fill = (
+            section_fill
+        )
+
+        worksheet["A5"].font = (
+            bold_font
+        )
+
         worksheet["A5"].alignment = Alignment(
             horizontal="center",
         )
@@ -592,54 +678,87 @@ class ExportService:
         worksheet.merge_cells(
             "C5:D5"
         )
+
         worksheet["C5"] = (
             "Current Delivery Status"
         )
-        worksheet["C5"].fill = section_fill
-        worksheet["C5"].font = bold_font
+
+        worksheet["C5"].fill = (
+            section_fill
+        )
+
+        worksheet["C5"].font = (
+            bold_font
+        )
+
         worksheet["C5"].alignment = Alignment(
             horizontal="center",
         )
 
         for column, heading in (
-            ("A", "Movement"),
-            ("B", "Count"),
-            ("C", "Delivery status"),
-            ("D", "Count"),
+            (
+                "A",
+                "Movement",
+            ),
+            (
+                "B",
+                "Count",
+            ),
+            (
+                "C",
+                "Delivery status",
+            ),
+            (
+                "D",
+                "Count",
+            ),
         ):
             cell = worksheet[
                 f"{column}6"
             ]
+
             cell.value = heading
             cell.fill = header_fill
             cell.font = white_font
+
             cell.alignment = Alignment(
                 horizontal="center",
                 vertical="center",
             )
+
             cell.border = thin_border
 
         max_rows = max(
-            len(movement_rows),
-            len(delivery_rows),
+            len(
+                movement_rows
+            ),
+            len(
+                delivery_rows
+            ),
         )
 
         for index in range(
             max_rows
         ):
-            row_number = 7 + index
+            row_number = (
+                7 + index
+            )
 
             if index < len(
                 movement_rows
             ):
                 label, value = (
-                    movement_rows[index]
+                    movement_rows[
+                        index
+                    ]
                 )
+
                 worksheet.cell(
                     row=row_number,
                     column=1,
                     value=label,
                 )
+
                 worksheet.cell(
                     row=row_number,
                     column=2,
@@ -650,13 +769,17 @@ class ExportService:
                 delivery_rows
             ):
                 label, value = (
-                    delivery_rows[index]
+                    delivery_rows[
+                        index
+                    ]
                 )
+
                 worksheet.cell(
                     row=row_number,
                     column=3,
                     value=label,
                 )
+
                 worksheet.cell(
                     row=row_number,
                     column=4,
@@ -671,7 +794,9 @@ class ExportService:
                     row=row_number,
                     column=column_number,
                 )
+
                 cell.border = thin_border
+
                 cell.alignment = Alignment(
                     vertical="center",
                     wrap_text=True,
@@ -683,6 +808,7 @@ class ExportService:
             ).alignment = Alignment(
                 horizontal="center",
             )
+
             worksheet.cell(
                 row=row_number,
                 column=4,
@@ -720,10 +846,12 @@ class ExportService:
             "solid",
             fgColor="E2F0D9",
         )
+
         worksheet.cell(
             row=note_row,
             column=1,
         ).font = bold_font
+
         worksheet.cell(
             row=note_row,
             column=1,
@@ -734,12 +862,15 @@ class ExportService:
         movement_chart = BarChart()
         movement_chart.type = "col"
         movement_chart.style = 10
+
         movement_chart.title = (
             "Progress Movement"
         )
+
         movement_chart.y_axis.title = (
             "Number of audits"
         )
+
         movement_chart.x_axis.title = (
             "Movement"
         )
@@ -750,6 +881,7 @@ class ExportService:
             min_row=6,
             max_row=13,
         )
+
         movement_categories = Reference(
             worksheet,
             min_col=1,
@@ -761,9 +893,11 @@ class ExportService:
             movement_data,
             titles_from_data=True,
         )
+
         movement_chart.set_categories(
             movement_categories
         )
+
         movement_chart.height = 7
         movement_chart.width = 12
         movement_chart.legend = None
@@ -776,12 +910,15 @@ class ExportService:
         delivery_chart = BarChart()
         delivery_chart.type = "col"
         delivery_chart.style = 11
+
         delivery_chart.title = (
             "Current Delivery Status"
         )
+
         delivery_chart.y_axis.title = (
             "Number of audits"
         )
+
         delivery_chart.x_axis.title = (
             "Delivery status"
         )
@@ -792,6 +929,7 @@ class ExportService:
             min_row=6,
             max_row=13,
         )
+
         delivery_categories = Reference(
             worksheet,
             min_col=3,
@@ -803,9 +941,11 @@ class ExportService:
             delivery_data,
             titles_from_data=True,
         )
+
         delivery_chart.set_categories(
             delivery_categories
         )
+
         delivery_chart.height = 7
         delivery_chart.width = 12
         delivery_chart.legend = None
@@ -818,12 +958,15 @@ class ExportService:
         worksheet.column_dimensions[
             "A"
         ].width = 24
+
         worksheet.column_dimensions[
             "B"
         ].width = 12
+
         worksheet.column_dimensions[
             "C"
         ].width = 26
+
         worksheet.column_dimensions[
             "D"
         ].width = 14
@@ -837,7 +980,9 @@ class ExportService:
         """Create the audit-level analysis sheet."""
 
         rows = [
-            dict(row)
+            dict(
+                row
+            )
             for row in comparison.get(
                 "rows",
                 [],
@@ -869,17 +1014,22 @@ class ExportService:
             "Identity Change",
         ]
 
-        worksheet.sheet_view.showGridLines = False
+        worksheet.sheet_view.showGridLines = (
+            False
+        )
+
         worksheet.freeze_panes = "A2"
 
         header_fill = PatternFill(
             "solid",
             fgColor="17365D",
         )
+
         header_font = Font(
             color="FFFFFF",
             bold=True,
         )
+
         thin_border = Border(
             left=Side(
                 style="thin",
@@ -899,7 +1049,10 @@ class ExportService:
             ),
         )
 
-        for column_number, heading in enumerate(
+        for (
+            column_number,
+            heading,
+        ) in enumerate(
             headers,
             start=1,
         ):
@@ -908,13 +1061,16 @@ class ExportService:
                 column=column_number,
                 value=heading,
             )
+
             cell.fill = header_fill
             cell.font = header_font
+
             cell.alignment = Alignment(
                 horizontal="center",
                 vertical="center",
                 wrap_text=True,
             )
+
             cell.border = thin_border
 
         status_fills = {
@@ -932,7 +1088,10 @@ class ExportService:
             "Not currently listed": "D9D9D9",
         }
 
-        for row_number, row in enumerate(
+        for (
+            row_number,
+            row,
+        ) in enumerate(
             rows,
             start=2,
         ):
@@ -1011,7 +1170,10 @@ class ExportService:
                 ),
             ]
 
-            for column_number, value in enumerate(
+            for (
+                column_number,
+                value,
+            ) in enumerate(
                 values,
                 start=1,
             ):
@@ -1020,7 +1182,9 @@ class ExportService:
                     column=column_number,
                     value=value,
                 )
+
                 cell.border = thin_border
+
                 cell.alignment = Alignment(
                     vertical="top",
                     wrap_text=True,
@@ -1033,8 +1197,10 @@ class ExportService:
                 )
             )
 
-            delivery_fill = status_fills.get(
-                delivery_label
+            delivery_fill = (
+                status_fills.get(
+                    delivery_label
+                )
             )
 
             if delivery_fill:
@@ -1061,6 +1227,7 @@ class ExportService:
                     "solid",
                     fgColor="F4CCCC",
                 )
+
             elif movement_label == "Progressed":
                 worksheet.cell(
                     row=row_number,
@@ -1069,7 +1236,10 @@ class ExportService:
                     "solid",
                     fgColor="C6E0B4",
                 )
-            elif movement_label == "Not comparable":
+
+            elif movement_label == (
+                "Not comparable"
+            ):
                 worksheet.cell(
                     row=row_number,
                     column=12,
@@ -1093,7 +1263,10 @@ class ExportService:
                     "solid",
                     fgColor="FFF2CC",
                 )
-            elif match_method == "strong_identity":
+
+            elif match_method == (
+                "strong_identity"
+            ):
                 worksheet.cell(
                     row=row_number,
                     column=16,
@@ -1141,7 +1314,10 @@ class ExportService:
             "R": 55,
         }
 
-        for column_letter, width in widths.items():
+        for (
+            column_letter,
+            width,
+        ) in widths.items():
             worksheet.column_dimensions[
                 column_letter
             ].width = width
@@ -1174,8 +1350,10 @@ class ExportService:
     ) -> Path:
         """Export audit records to CSV."""
 
-        output_directory = self._create_output_directory(
-            output_folder
+        output_directory = (
+            self._create_output_directory(
+                output_folder
+            )
         )
 
         output_path = (
@@ -1186,15 +1364,25 @@ class ExportService:
             )
         )
 
-        dataframe = self._prepare_dataframe(
-            records
+        dataframe = (
+            self._prepare_dataframe(
+                records
+            )
         )
 
         for date_column in self.DATE_COLUMNS:
-            dataframe[date_column] = (
-                dataframe[date_column]
-                .dt.strftime("%d %B %Y")
-                .fillna("")
+            dataframe[
+                date_column
+            ] = (
+                dataframe[
+                    date_column
+                ]
+                .dt.strftime(
+                    "%d %B %Y"
+                )
+                .fillna(
+                    ""
+                )
             )
 
         dataframe.to_csv(

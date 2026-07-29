@@ -27,6 +27,7 @@ class ExtractionPage(QWidget):
     def __init__(
         self,
         on_open_system: Callable[[], None],
+        on_open_output_folder: Callable[[], None],
         on_start_extraction: Callable[[dict[str, Any]], None],
         system_name: str = "A-SEAT",
         parent: QWidget | None = None,
@@ -36,6 +37,7 @@ class ExtractionPage(QWidget):
         self.setObjectName("contentPage")
 
         self._on_open_system = on_open_system
+        self._on_open_output_folder = on_open_output_folder
         self._on_start_extraction = on_start_extraction
 
         self.system_name = (
@@ -137,6 +139,13 @@ class ExtractionPage(QWidget):
             self._on_open_system
         )
 
+        self.open_output_folder_button = QPushButton(
+            "Open Output Folder"
+        )
+        self.open_output_folder_button.clicked.connect(
+            self._on_open_output_folder
+        )
+
         self.start_extraction_button = QPushButton(
             "Start Extraction"
         )
@@ -157,6 +166,9 @@ class ExtractionPage(QWidget):
 
         button_layout.addWidget(
             self.open_system_button
+        )
+        button_layout.addWidget(
+            self.open_output_folder_button
         )
         button_layout.addWidget(
             self.start_extraction_button
@@ -367,6 +379,10 @@ class ExtractionPage(QWidget):
         )
 
         self.open_system_button.setEnabled(
+            not busy
+        )
+
+        self.open_output_folder_button.setEnabled(
             not busy
         )
 

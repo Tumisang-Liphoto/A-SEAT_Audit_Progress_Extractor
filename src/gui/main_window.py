@@ -156,6 +156,7 @@ class MainWindow(QMainWindow):
 
         self.extraction_page = ExtractionPage(
             self._open_system,
+            self._open_output_folder,
             self._start_extraction,
             system_name=self._system_name(),
         )
@@ -706,6 +707,10 @@ class MainWindow(QMainWindow):
         if not str(
             output_folder
         ).strip() or not output_folder.is_dir():
+            self.logger.warning(
+                "Output folder could not be opened because it is not configured or invalid."
+            )
+
             QMessageBox.warning(
                 self,
                 "Output Folder Not Available",
@@ -726,12 +731,22 @@ class MainWindow(QMainWindow):
             )
         )
 
-        if not opened:
-            QMessageBox.critical(
-                self,
-                "Unable to Open Folder",
-                "The configured output folder could not be opened.",
+        if opened:
+            self.logger.info(
+                "Output folder opened."
             )
+            return
+
+        self.logger.error(
+            "The configured output folder could not be opened: %s",
+            output_folder,
+        )
+
+        QMessageBox.critical(
+            self,
+            "Unable to Open Folder",
+            "The configured output folder could not be opened.",
+        )
 
     def _open_application_data_folder(self) -> None:
         """Open the local application data folder."""
